@@ -13,6 +13,20 @@ html, body { width: 100%; height: 100%; overflow: hidden; background: #000; }
   will-change: transform;
 }
 
+/* The notice that the page is not Sony's, kept faint at the bottom, clear of the panels at the top. */
+.disclaimer {
+  position: fixed;
+  left: 16px;
+  right: 16px;
+  bottom: 8px;
+  z-index: 1;
+  text-align: center;
+  color: rgba(255, 255, 255, 0.35);
+  font: 10px/1.3 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  pointer-events: none;
+  user-select: none;
+}
+
 .ui-layer-root {
   position: fixed;
   inset: 0;
