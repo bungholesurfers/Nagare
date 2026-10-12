@@ -149,9 +149,10 @@ picks one of two copies of the tables and the noise: those at `0x2b60000`, `0x2b
 The chain's textures are set to CLAMP, which RPCS3 runs as clamp-to-edge (`vk_wrap_mode`, in its
 `VKFormats.cpp`): a tap or a read past an edge repeats the edge's texel. Its screenshots under the
 music show it: the backdrop's own glare, brightest at the top right, reaches that corner whole,
-where a black border leaves it 27 to 33 levels short. The RSX's own CLAMP blends the edge with the
-border colour, which only real hardware could show. The mask is 0 below the threshold and reaches 1, where it stays,
-at y = 3.2 for a threshold of 0.7, so the glare's source is at most 8 times the screen.
+where a black border leaves it 27 to 33 levels short. The page follows it - see [Ruled
+out](history.md#ruled-out) for the RSX's own CLAMP. The mask is 0 below the threshold and reaches
+1, where it stays, at y = 3.2 for a threshold of 0.7, so the glare's source is at most 8 times the
+screen.
 
 ## The HDR renderer
 

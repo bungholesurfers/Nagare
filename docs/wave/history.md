@@ -6,10 +6,12 @@ may already be ruled out.
 
 ## Ruled out
 
-- **The glare's textures fading to a black border.** Their CLAMP was read as the RSX's, which
-  blends a texture's edge with its border colour, black. RPCS3 runs it as clamp-to-edge, and its
-  screenshots under the music, bright up to the top right corner, are 27 to 33 levels brighter
-  there than a black border gives - see [The glare](postprocess.md#the-glare).
+- **The glare's textures fading to a black border.** Their CLAMP was read as the RSX's, which,
+  as the GPUs it descends from did, would blend a texture's edge with its border colour, black.
+  RPCS3 runs it as clamp-to-edge, and its screenshots under the music, bright up to the top right
+  corner, are 27 to 33 levels brighter there than a black border gives - see [The
+  glare](postprocess.md#the-glare). How a real RSX runs it was never checked, and is not pursued:
+  the page follows RPCS3.
 - **The captures' y running down the screen.** Plotted beside a frame of a video recorded the
   same minute, a capture's wave looked upside down. It is not. In the captures the icons'
   category row sits at y = +0.463, at the top of the screen as in the video - see [Where the icons

@@ -56,9 +56,6 @@ wave on screen:
   console](docs/wave/implementation.md#against-the-console). The start the page makes has its
   energy and stretch, and the wave's pace and depth at rest match; for the first minutes after
   the reset its band is about a tenth thinner, and at first nearer.
-- **The glare's edges on the RSX.** Its textures are set to CLAMP, which RPCS3 runs as
-  clamp-to-edge and the page follows; the RSX's own blends the edge with the border colour, which
-  would dim the glare along the screen's edges - see [The glare](docs/wave/postprocess.md#the-glare).
 - **A run from the reset.** What, beyond the cold boot's ramp of `PERTURBATION`, keeps a run from
   the reset from landing on a savestate - see [From the start](docs/wave/lines.md#from-the-start).
 

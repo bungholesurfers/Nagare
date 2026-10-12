@@ -180,7 +180,7 @@
   // Gaussian.fpo and Gaussian.vpo: the texel itself and up to seven on either side along one axis (_Offset, one texel
   // of the level), each channel with its own weights. The chain's textures are set to CLAMP, which RPCS3 runs as
   // clamp-to-edge (VKFormats.cpp's vk_wrap_mode), so a tap past the edge reads the edge's texel - its screenshots under
-  // the music, bright up to the top right corner, show it; the RSX's own CLAMP would blend the edge with the border.
+  // the music, bright up to the top right corner, show it; the RSX's own CLAMP might blend the edge with the border.
   const GAUSSIAN_FS = `#version 300 es
     precision highp float;
     uniform sampler2D uSrc;
