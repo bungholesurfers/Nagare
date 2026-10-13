@@ -111,7 +111,7 @@ Every setting's name has a tooltip that says what it does and where it comes fro
 
 4. **UI visibility**:
    - Each panel has a `Hide` button and a matching `Show ...` button.
-   - There is no global fullscreen/hide-all hotkey in the new version right now.
+   - `H` hides or shows every control, and the notice at the bottom; opening the page with `?ui=off` starts it without them, for the scene alone - in a frame or as a wallpaper.
 
 
 ## Technical Details (subject to change anytime)

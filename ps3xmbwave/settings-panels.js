@@ -102,6 +102,7 @@
     hideBtn.className = 'settings-btn';
     hideBtn.type = 'button';
     hideBtn.textContent = 'Hide';
+    if (options.hideTitle) hideBtn.title = options.hideTitle;
 
     const list = document.createElement('div');
     list.className = 'settings-panel-list';

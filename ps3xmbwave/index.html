@@ -53,6 +53,8 @@
       window.addEventListener('resize', resize);
       resize();
 
+      const HIDE_TITLE = 'Hide this panel - Press H to toggle GUI visibility';
+
       const splinePanel = window.createSettingsPanel({
         id: 'spline-panel',
         title: 'Spline Controls',
@@ -63,6 +65,7 @@
         lockable: window.WAVE_THEME_KEYS,
         position: { top: '12px', right: '12px' },
         showPosition: { top: '12px', right: '12px' },
+        hideTitle: HIDE_TITLE,
       });
 
       const particlesPanel = window.createSettingsPanel({
@@ -74,6 +77,18 @@
         lockable: window.PARTICLE_THEME_KEYS,
         position: { top: '12px', left: '12px' },
         showPosition: { top: '12px', left: '12px' },
+        hideTitle: HIDE_TITLE,
+      });
+
+      // The controls and the notice can be put away, for the scene alone - in a frame or as a wallpaper: H toggles
+      // them, unless it is typed into a control or comes with a modifier (Ctrl+H is the browser's), and ?ui=off starts
+      // the page without them. Each panel comes back as it was left, open or hidden behind its Show button.
+      if (new URLSearchParams(window.location.search).get('ui') === 'off') document.body.classList.add('ui-off');
+      window.addEventListener('keydown', function (e) {
+        if (e.key !== 'h' && e.key !== 'H') return;
+        if (e.ctrlKey || e.altKey || e.metaKey || e.repeat) return;
+        if (e.target && e.target.closest && e.target.closest('input, select, textarea')) return;
+        document.body.classList.toggle('ui-off');
       });
 
       // The theme writes the firmware's own parameter sets into the particles' and the wave's settings; on 'auto' it
