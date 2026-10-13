@@ -123,5 +123,13 @@ and a dimmer, then goes by the flags' second hex digit:
 
 Closing the board (`0x104e8`) always sends event 11, sub-event 3, taking the factor back to 0
 over 2 seconds from wherever it stands, and if the board had faded the theme and `_Color`, it
-brings them back at once (`0x10980`). Which of the XMB's actions opens the board with which
-flags is not traced: they come from its caller.
+brings them back at once (`0x10980`).
+
+Which of the XMB's actions opens the board with which flags is not traced, and is not pursued: it
+is the XMB's doing, not the scene's, and the page sets the factor by hand (`whatsNewBoard`). On
+the console, focusing What's New hides the scene, which is what the first branch does. Other items
+hide it as they are focused too: Photo Gallery in the Photo column, PlayStation Store in the Game
+and PlayStation Network columns, and the sign-up in PlayStation Network's; on a real console, most
+installed games as well (RPCS3's XMB does not list the games installed through it). No capture
+has caught the factor the second branch moves off zero - see [What moves the two
+factors](#what-moves-the-two-factors).

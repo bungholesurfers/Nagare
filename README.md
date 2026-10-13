@@ -154,6 +154,6 @@ Found a bug or something that looks different from the console? [Open an issue o
 
 - Bring the wave's first minutes after a start closer to the console's: its lines start from a state baked into the firmware, which the page has to make its own way - see [WAVE_REVERSE_ENGINEER.md](WAVE_REVERSE_ENGINEER.md#still-missing).
 - Find what keeps a run of the lines from the reset from landing exactly on a savestate.
-- Trace the XMB's side of the sparkles: how it moves its icons and when it repeats a held direction, which the page models, and which of its actions open What's New's board - see [PARTICLES_REVERSE_ENGINEER.md](PARTICLES_REVERSE_ENGINEER.md#still-missing).
+- Trace the XMB's side of the sparkles: how it moves its icons and when it repeats a held direction, which the page models - see [PARTICLES_REVERSE_ENGINEER.md](PARTICLES_REVERSE_ENGINEER.md#still-missing).
 - Find where `_Gamma` comes from, what starts `anim_coldboot` and who sends the scene its events 2 and 3.
 - Catch the backdrop's ease in a frame capture, to confirm the copy it starts from - see [BACKGROUND_REVERSE_ENGINEER.md](BACKGROUND_REVERSE_ENGINEER.md#still-missing).

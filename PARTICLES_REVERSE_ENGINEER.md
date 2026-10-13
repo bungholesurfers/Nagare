@@ -55,13 +55,6 @@ The implementation models all of these:
 
 Also missing:
 
-- Which of the XMB's actions open What's New's board in which mode, and so switch the first
-  `PARTICLES_SPE.mnu` factor on - see [What's New's
-  board](docs/particles/scene-events.md#whats-news-board). The board's side, and the factor's
-  animation, are traced.
-- `proc_iridescent` exactly. It is a file of the firmware's resources, not generated at run time, so
-  the implementation stands in for it with [the
-  fit](docs/particles/shaders.md#the-iridescent-texture).
 - What `paf` keeps in the variables `_Gamma` comes from, which scales the particles and, through the
   wave's tone curve, the screen behind them - see [Uniform values at run
   time](docs/particles/shaders.md#uniform-values-at-run-time).

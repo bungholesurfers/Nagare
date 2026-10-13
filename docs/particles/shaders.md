@@ -174,19 +174,28 @@ page leaves out, WebGL having none.
 
 ## The iridescent texture
 
-**Inferred, by fitting.** `proc_iridescent.tga` depends only on a spiral phase around its
-centre:
+**Verified in the captures: the programs sample the file as it is.** At the particle draws the
+RSX holds `proc_iridescent.tga`'s texels exactly, swizzled, in the order the file stores them -
+its rows bottom-up, as TGA keeps them - and the same in every capture. Its sampler mirrors and
+filters through mipmaps, neither of which tells here: the lookup is the flake's normal in view
+space, inside the unit disc and the same at the four corners of a quad, so it never leaves the
+texture and reads its top level. `iridescent exp` and `color_control` are 1 in every set and in
+both passes of every capture, so the texture's colour reaches the specular as it is.
+
+**Inferred, by fitting.** The texture depends only on a spiral phase around its centre:
 
 - t = (θ − 0.025 r − 0.00006 r²) / 2π, where r is the distance in texels from (63.5, 63.5)
   and θ the angle, with y pointing down the image;
 - averaging the colour by phase leaves no radial trend;
-- a periodic Catmull-Rom curve through 16 colours reproduces it with an RMS error of 13/255
-  (11/255 with 32);
+- a periodic Catmull-Rom curve through 16 colours reproduces it with an RMS error of 12/255
+  over the disc the programs read, and 19/255 over the whole texture, whose corners no lookup
+  reaches;
 - the colours run like thin-film interference: white, yellow, orange, magenta, violet,
   blue, lavender, pink, olive, and back to white.
 
-`particles.js` builds the texture from those 16 colours at start-up. It never reads the
-firmware texture.
+`particles.js` builds the texture from those 16 colours at start-up, the file's way up: mirrored,
+its error would be 85/255. It never reads the firmware texture. The fit is taken as close enough,
+and the texture is not pursued further.
 
 ## Frame captures
 
