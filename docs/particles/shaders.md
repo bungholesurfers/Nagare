@@ -167,10 +167,10 @@ saturate((x − a) / (b − a)).
 | 2 | the spot's constant, linear and quadratic attenuation |
 | 3 | `lambert coeff`, `specular coeff`, `exposure`, `color_control` |
 
-**Blend state, verified from the captures.** Both particle draws and the wave's draw blend
-additively (`ONE / ONE`), with depth test and depth writes off. The particle draws also
-enable the alpha test. `ps3xmbwave/spline.js` still draws its wave with
-`SRC_ALPHA / ONE_MINUS_SRC_ALPHA`.
+**Blend state, verified from the captures.** Both particle draws blend additively (`ONE / ONE`)
+over the screen, with depth test and depth writes off, as the wave's draw does into a buffer of
+its own - see [The draw](../wave/shading.md#the-draw). They also enable the alpha test, which the
+page leaves out, WebGL having none.
 
 ## The iridescent texture
 
