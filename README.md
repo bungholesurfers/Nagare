@@ -161,8 +161,3 @@ No Sony firmware, code, shaders or assets are distributed here. The renderer and
 ## Support
 
 Found a bug or something that looks different from the console? [Open an issue on GitHub!](https://github.com/faquino/PlayStation-3-XMB/issues)
-
-
-## TODO
-
-- Find what starts `anim_coldboot` and who sends the scene its events 2 and 3 - see [PARTICLES_REVERSE_ENGINEER.md](PARTICLES_REVERSE_ENGINEER.md#still-missing).

@@ -45,8 +45,11 @@ What `ps3xmbwave/` ports as verified and what it models, file by file;
 
 ## Still missing
 
-- What starts `anim_coldboot` and who sends events 2 and 3 - see [Where the events come
-  from](docs/particles/scene-events.md#where-the-events-come-from).
+Nothing is open. The last questions were the XMB's side of the scene: `anim_coldboot` is an older
+start that nothing in 4.93 starts - see [What puts each set
+in](docs/particles/parameter-sets.md#what-puts-each-set-in) - and which of the XMB's actions send
+events 2 and 3 is not pursued - see [Where the events come
+from](docs/particles/scene-events.md#where-the-events-come-from).
 
 ## Keeping these notes
 

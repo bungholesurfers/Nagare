@@ -42,9 +42,16 @@ logo left out:
 | Animation | Started by | Steps |
 |---|---|---|
 | `anim_coldboot2` | event 1, sub-event 0, which `vsh.elf` sends | BootBG2 at 0; NormalBG2 at 4 s; ShowGUI at 5.5 s; Finished at 10 s |
-| `anim_coldboot` | nothing in the code | BootBG1 and NormalBG at 0; ShowGUI at 5.5 s; Finished at 10 s |
+| `anim_coldboot` | nothing in 4.93: the older start, below | BootBG1 and NormalBG at 0; ShowGUI at 5.5 s; Finished at 10 s |
 | `anim_gameboot` | event 2 | BG2 at 0; BG3 at 0.5 s; Finished at 2.8 s |
 | `anim_otherboot` | event 3 | BG3 at 0; BG4 at 0.2 s; Finished at 0.5 s |
+
+The `.rco` holds two start pages, `page_coldboot` and `page_coldboot2`, and by the names in its
+string table the first carries the SCE logo (`scelogo`) and the second the PS3 logo
+(`coldboot_ps3logo`). `anim_coldboot` is the first's start, which the firmware keeps and nothing
+in 4.93 starts, as nothing applies some of the sets below; `anim_coldboot2` is the start the
+captures show. Who sends events 2 and 3 is in [Where the events come
+from](scene-events.md#where-the-events-come-from).
 
 And what the handlers apply:
 

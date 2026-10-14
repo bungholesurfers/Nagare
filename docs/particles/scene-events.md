@@ -49,7 +49,10 @@ and every place they fetch the scene's interface is accounted for.
 - event 1 is the cold boot (`page_coldboot`, `anim_coldboot2`, the cold-boot sounds), which
   `vsh.elf` sends with sub-events 0 and 5 (`0xcd628`, `0xcf31c`), and `explore_plugin` and the
   XMB's columns (`explore_category_*`) with 5;
-- event 2 is a game's boot (`anim_gameboot`), event 3 another boot (`anim_otherboot`);
+- event 2 is a game's boot (`anim_gameboot`), event 3 another boot (`anim_otherboot`). None of
+  the places that fetch the scene's interface sends either, so they reach the handler through code
+  that passes on an event it is handed. Which of the XMB's actions launch them is the XMB's doing,
+  not the scene's, and is not pursued: the page plays them as `sequence` names them;
 - event 4 is the music, which the scene sends itself (`0x16808`, `0x1672c`) as the music
   player's visualizer starts and stops it, below: sub-event 2 takes in `override/music_1` unless
   it is in already, and 3 leaves it;
