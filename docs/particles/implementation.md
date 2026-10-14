@@ -103,8 +103,9 @@ on each frame that passes its draw, simply keeps it that way.
     third of the screen's height in a few frames.
 - **Input.** The response is ported - see [The controller](controller.md#the-controller). What
   stands in for the controller - the arrow keys and the mouse, in `xmb-input.js` - is modelled,
-  and with it the page's own: up and down turning the field, the diagonals, and the pointer's
-  wind - see [The page's input](input.md).
+  and with it the page's own: the half second a held direction waits before its first repeat, up
+  and down turning the field, the diagonals, and the pointer's wind - see [The page's
+  input](input.md).
 
 ## Against the console
 

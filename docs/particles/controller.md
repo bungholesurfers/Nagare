@@ -67,7 +67,9 @@ The task rebuilds the field's matrix from the final vector, shakes included (`FU
   read the turn at 0.176, 0.179, 0.185 and 0.191 times `dpad rot max`. A step every n frames
   keeps the spring between 0.98^(n−1) × 0.03 / (1 − 0.98^n) and 0.03 / (1 − 0.98^n):
   0.1745 to 0.2011 for n = 8, 0.1535 to 0.1804 for 9, and 0.2015 to 0.2274 for 7. Only 8
-  holds all four.
+  holds all four. How long the XMB waits before the first repeat is its menu's doing, not the
+  scene's, and is not pursued; it only moves when a held turn begins - see [The page's
+  input](input.md#the-arrow-keys).
 - **Only sideways steps kick the noise**, by 0.04 each. A tap raises the noise by at most a
   quarter, and a held direction drives the level to 1.
 - **A shake turns the field only as it starts**, and the turn is gone within a second. While

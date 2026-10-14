@@ -103,8 +103,10 @@
   const ITEMS = 8;
   const POINTER_ID = -1; // the page's pointer, among the ids the wind writer remembers icons by
   // The XMB repeats a held direction every 8 frames: the captures taken holding one put the turn's spring between
-  // 0.176 and 0.191, which only a step every 8 frames keeps it in. How long it waits before the first repeat is not
-  // known; the adapter reports a direction as held once the browser starts repeating its key.
+  // 0.176 and 0.191, which only a step every 8 frames keeps it in. How long it waits before the first repeat is the
+  // XMB's, not the scene's, and not pursued: the page waits 30 frames, half a second, from the step the key sent,
+  // counted here rather than left to the browser's own repeat, which each system sets apart.
+  const FIRST_REPEAT_FRAMES = 30;
   const REPEAT_FRAMES = 8;
   const STEP_HZ = 60;
   const MAX_STEPS_PER_FRAME = 4;
@@ -331,6 +333,8 @@
     const pendingSteps = [];
     const frameInput = { step: -1, held: -1, sensor: null, pointer: null, diagonal: null };
     let sinceStep = REPEAT_FRAMES;
+    // Frames since each direction's key sent its step, which its first repeat waits on, kept no higher than that wait.
+    const sincePress = new Int32Array(DPAD_DIRECTIONS.length).fill(FIRST_REPEAT_FRAMES);
 
     // The first PARTICLES_SPE.mnu factor, an animation the particle object keeps at +0x140: where it stands, where it
     // started from and is going, and how long it has run.
@@ -895,12 +899,19 @@
       frameInput.diagonal = ev.diagonal || null;
     }
 
-    // This frame's step: the next one sent, or a held direction's repeat (modelled).
+    // This frame's step: the next one sent, or a held direction's repeat (modelled), FIRST_REPEAT_FRAMES after its
+    // key's step and REPEAT_FRAMES after the last step.
     function nextStep() {
       sinceStep++;
+      for (let d = 0; d < sincePress.length; d++) if (sincePress[d] < FIRST_REPEAT_FRAMES) sincePress[d]++;
       let dir = -1;
-      if (pendingSteps.length) dir = pendingSteps.shift();
-      else if (frameInput.held >= 0 && sinceStep >= REPEAT_FRAMES) dir = frameInput.held;
+      if (pendingSteps.length) {
+        dir = pendingSteps.shift();
+        sincePress[dir] = 0;
+      } else if (frameInput.held >= 0 && sincePress[frameInput.held] >= FIRST_REPEAT_FRAMES &&
+          sinceStep >= REPEAT_FRAMES) {
+        dir = frameInput.held;
+      }
       if (dir >= 0) sinceStep = 0;
       return dir;
     }

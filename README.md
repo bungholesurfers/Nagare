@@ -166,6 +166,5 @@ Found a bug or something that looks different from the console? [Open an issue o
 ## TODO
 
 - Find what keeps a run of the lines from the reset from landing exactly on a savestate - see [WAVE_REVERSE_ENGINEER.md](WAVE_REVERSE_ENGINEER.md#still-missing).
-- Trace the XMB's side of the sparkles: how it moves its icons and when it repeats a held direction, which the page models - see [PARTICLES_REVERSE_ENGINEER.md](PARTICLES_REVERSE_ENGINEER.md#still-missing).
-- Find where `_Gamma` comes from, what starts `anim_coldboot` and who sends the scene its events 2 and 3.
+- Find where `_Gamma` comes from, what starts `anim_coldboot` and who sends the scene its events 2 and 3 - see [PARTICLES_REVERSE_ENGINEER.md](PARTICLES_REVERSE_ENGINEER.md#still-missing).
 - Catch the backdrop's ease in a frame capture, to confirm the copy it starts from - see [BACKGROUND_REVERSE_ENGINEER.md](BACKGROUND_REVERSE_ENGINEER.md#still-missing).

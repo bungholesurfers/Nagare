@@ -18,11 +18,10 @@
     // Where the pointer is, in normalised device coordinates with y up, while it is over the scene and not dragging.
     let pointer = null;
     const steps = []; // directions sent since the last poll
-    // The arrow keys down, oldest first, and whether the browser has started repeating one: from then on the newest
-    // of them is held, which the XMB repeats in the particle system, counting the console's frames. Letting it go
-    // hands the hold to the one before it, if that is still down - the browser repeats only the last key pressed.
+    // The arrow keys down, oldest first. The newest of them is held, which the particle system repeats as the XMB
+    // does, counting the console's frames from the step it sent; the browser's own repeat is not used. Letting it go
+    // hands the hold to the one before it, if that is still down.
     const down = [];
-    let repeating = false;
     let dragging = false;
     let lastX = 0;
     let lastY = 0;
@@ -58,7 +57,6 @@
     window.addEventListener('blur', function () {
       endDrag();
       down.length = 0;
-      repeating = false;
       pointer = null;
     });
 
@@ -83,20 +81,16 @@
     window.addEventListener('keydown', function (e) {
       if (overUi(document.activeElement)) return;
       const dir = KEYS[e.key];
-      if (dir === undefined) return;
-      if (!e.repeat) {
-        if (down.indexOf(dir) < 0) down.push(dir);
-        send(dir, 1);
-        repeating = false;
-      } else {
-        repeating = true;
-      }
+      if (dir === undefined || e.repeat) return;
+      const i = down.indexOf(dir);
+      if (i >= 0) down.splice(i, 1);
+      down.push(dir);
+      send(dir, 1);
     });
 
     window.addEventListener('keyup', function (e) {
       const i = down.indexOf(KEYS[e.key]);
       if (i >= 0) down.splice(i, 1);
-      if (!down.length) repeating = false;
     });
 
     // Called once per rendered frame: the steps sent since the last call, the direction held, the Sixaxis's reading,
@@ -121,7 +115,7 @@
       sensor[2] = 0;
       sensor[3] = clamp1(velX * settings.mouseYawGain);
 
-      const held = repeating && down.length ? down[down.length - 1] : -1;
+      const held = down.length ? down[down.length - 1] : -1;
       let across = -1;
       let upDown = -1;
       for (const d of down) {

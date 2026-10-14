@@ -9,11 +9,14 @@ for the controller is modelled. The rest of the implementation is in
 
 ## The arrow keys
 
-- Steps are the arrow keys, one a frame, the way the XMB sends them. A key the browser repeats is
-  held - the newest of those down, since the browser repeats only the last one pressed - and the
-  system repeats it every 8 frames of its own, the rate the captures' turn implies. Held for ten
-  seconds, the turn settles between 0.1745 and 0.2010 times `dpad rot max`, where the four
-  captures read 0.176 to 0.191.
+- Steps are the arrow keys, one a frame, the way the XMB sends them. The newest key down is held,
+  and the system repeats it 30 frames of its own after the step it sent, then every 8, the rate
+  the captures' turn implies. How long the XMB waits before the first repeat is the XMB's, not the
+  scene's, and is not pursued: the page's half second is counted by the system, not left to the
+  browser's own repeat, which each system's keyboard settings set apart. Letting the newest go
+  hands the hold to the one before it, if that is still down. Held for ten seconds, the turn
+  settles between 0.1745 and 0.2010 times `dpad rot max`, where the four captures read 0.176 to
+  0.191.
 - Every step also moves the modelled icons, whose wind goes through the flow grid - see [Modelled
   choices](implementation.md#modelled-choices): sideways steps raise it along the row - in y, the
   icons growing and shrinking, `icon wind scl x` being 0 - as well as turning the field, as on the
@@ -36,10 +39,10 @@ a step to the right.
 
 **Headless**, holding a direction for two seconds - a step, then after 30 frames one every 8:
 
-- the field turns only from the fourth step on, and until 33 frames after the key is let go. A
-  second after that, the drawn particles' mean has moved by -0.34 in x for right and +0.27 for
-  left. A single tap does not turn the field at all. Under Scroll, down and up move the mean by
-  +0.06 and -0.04 in y: the wind acts only where the icons move;
+- the field turns only from the fourth step on, 46 frames after the press, and until 33 frames
+  after the key is let go. A second after that, the drawn particles' mean has moved by -0.34 in x
+  for right and +0.27 for left. A single tap does not turn the field at all. Under Scroll, down
+  and up move the mean by +0.06 and -0.04 in y: the wind acts only where the icons move;
 - as the key is let go, the turn has added 0.70 to the live particles' mean velocity, the way it
   sweeps them, for right and for up alike, and right and up held together add 0.71 at 45°, the
   turn a frame peaking at 2.02e-5 against 2.04e-5. Their mean place is a poor gauge sideways: the
