@@ -124,11 +124,21 @@ another](../particles/day-cycle.md#how-one-set-blends-into-another). The runs fi
 moving it once a step: with the full value from the reset the points end 0.033 apart after 1235
 steps, and with a smoothstep over 3 seconds 0.009.
 
-What is left is not traced. The lines magnify any difference - 1e-6 added to one velocity grows to
-3.5e-5 by step 2193 and 0.08 by step 6000 - but starting the ramp a step later moves the points by
-only 3e-4 at step 1235, a fifteenth of what is left. The boot's frame pacing, which no savestate
-records, is a candidate: in the captures the ramp's first 61 and 184 frames took 73 and 205
-steps.
+What is left is not pursued. The lines magnify any difference - 1e-6 added to one velocity grows to
+3.5e-5 by step 2193 and 0.08 by step 6000 - and two that the page cannot reproduce feed them:
+
+- **The boot's frame pacing**, which no savestate records. The ramp moves a frame at a time while
+  the lines step at 60 Hz, and in the captures its first 61 and 184 frames took 73 and 205 steps.
+  Starting the ramp a step later moves the points by only 3e-4 at step 1235, a fifteenth of what
+  is left.
+- **The PPU's arithmetic.** Each spring's length comes from a reciprocal square root estimate
+  (`vrsqrtefp`) refined by one Newton step (`0x46284`), with fused multiply-adds (`vmaddfp`), all
+  in single precision, where the page works in double and stores in single. Matching it bit for
+  bit would mean matching how RPCS3 emulates those instructions, which need not be how the Cell
+  runs them.
+
+Neither changes the wave on screen, and the page does not start from the console's state anyway -
+see [The start](#the-start).
 
 ## What the task receives
 

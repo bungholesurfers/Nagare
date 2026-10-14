@@ -138,7 +138,7 @@ Every setting's name has a tooltip that says what it does and where it comes fro
 
 ### Reverse-Engineered Wave Status
 - **What is implemented**: the lines' simulation, the deformation lattice, the free-form deformation, the camera and the B-spline surface, with the line programs' shading, the passes that follow the wave, and the firmware's `LINE1.mnu`, `HDR.mnu` and `BACKGROUND.mnu` sets - see [WAVE_REVERSE_ENGINEER.md](WAVE_REVERSE_ENGINEER.md) and [BACKGROUND_REVERSE_ENGINEER.md](BACKGROUND_REVERSE_ENGINEER.md).
-- **What is still missing**: what keeps a run from the reset from landing exactly on a savestate. The very first minutes after a start stay as the page makes them: matching the console's would take its baked start itself.
+- **What stays apart**: the very first minutes after a start stay as the page makes them, since matching the console's would take its baked start itself; and even from that start a run drifts from the console's in its detail, as the lines magnify the boot's frame pacing and the emulator's arithmetic - see [WAVE_REVERSE_ENGINEER.md](WAVE_REVERSE_ENGINEER.md#still-missing).
 
 
 ## License and Disclaimer
@@ -165,5 +165,4 @@ Found a bug or something that looks different from the console? [Open an issue o
 
 ## TODO
 
-- Find what keeps a run of the lines from the reset from landing exactly on a savestate - see [WAVE_REVERSE_ENGINEER.md](WAVE_REVERSE_ENGINEER.md#still-missing).
 - Find what starts `anim_coldboot` and who sends the scene its events 2 and 3 - see [PARTICLES_REVERSE_ENGINEER.md](PARTICLES_REVERSE_ENGINEER.md#still-missing).

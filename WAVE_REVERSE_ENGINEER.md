@@ -48,12 +48,9 @@ What `ps3xmbwave/` ports as verified and what it models, file by file;
 
 ## Still missing
 
-The implementation models all of these. They are listed roughly by how much each one changes the
-wave on screen:
-
-- **A run from the reset.** What, beyond the cold boot's ramp of `PERTURBATION`, keeps a run from
-  the reset from landing on a savestate - see [From the start](docs/wave/lines.md#from-the-start).
-
+Nothing is open. The last question, what keeps a run from the reset from landing on a savestate, is
+not pursued: the lines magnify the boot's frame pacing, which no savestate records, and the PPU's
+arithmetic, as RPCS3 emulates it - see [From the start](docs/wave/lines.md#from-the-start).
 
 ## Keeping these notes
 
