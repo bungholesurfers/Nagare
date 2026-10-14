@@ -5,6 +5,8 @@
 **Click the image for a demo!**
 [![Demo of PlayStation 3 XMB Waves Recreation](demo.png)](https://faquino.github.io/PlayStation-3-XMB/)
 
+The keyboard and mouse controls, the settings and the URL parameters are in [How to Use](#how-to-use-ps3xmbwave).
+
 
 ## About the Project
 
@@ -28,7 +30,7 @@ While this is inspired by the official PlayStation 3 XMB background wave design,
 - **WebGL2 renderer**: Pure WebGL2 rendering path (backdrop + wave mesh + the passes after it + particles), no framework dependency.
 - **The console's backdrop**: the default, `Auto (date and time)`, runs the XMB's own backdrop program, re-authored, over fits of its month textures: this month's and next month's colours taken through hue, saturation and value, lit by clocks that run through the day with two glows going round, next month wiped in up the screen as the month goes on, and the night's textures mixed in by the hour. Under the music it switches, as the console does, to the console's other program. The 12 month gradients with day/night variants, and an "Original (RGB Sliders)" mode, remain as presets.
 - **Live control panels**: separate spline and particle panels with a slider or select per setting, named after the firmware's own parameters. Tooltips indicate what each setting does and where it comes from; a reset per row, a lock that keeps a value from the theme, and colours that tell who set each value - by hand, the theme, a boot sequence or the music.
-- **Reverse-engineered particle system**: `particles-reverse.js` is a JavaScript port of the SPU update task in the PS3's `particles.elf` and of the PPU side that feeds it - the emitter, the flow grid and the controller's response - drawn in the two passes the XMB uses, re-authored in GLSL. The firmware's own parameter sets come with it: the day cycle runs by the clock, and the controller stand-in (mouse drag, pointer, arrow keys) stirs the field the way the real one does.
+- **Reverse-engineered particle system**: `particles-reverse.js` is a JavaScript port of the SPU update task in the PS3's `particles.elf` and of the PPU side that feeds it - the emitter, the flow grid and the controller's response - drawn in the two passes the XMB uses, re-authored in GLSL. The firmware's own parameter sets come with it: the day cycle runs by the clock, and the controller stand-in (arrow keys, mouse drag) stirs the field the way the real one does. The mouse pointer, which the console doesn't have, pushes the sparkles it passes over the way a moving XMB icon does.
 - **Reverse engineering notes included**: [SPLINE_REVERSE_ENGINEER.md](SPLINE_REVERSE_ENGINEER.md), [WAVE_REVERSE_ENGINEER.md](WAVE_REVERSE_ENGINEER.md) (an index into [`docs/wave/`](docs/wave/)), [PARTICLES_REVERSE_ENGINEER.md](PARTICLES_REVERSE_ENGINEER.md) (an index into [`docs/particles/`](docs/particles/)) and [BACKGROUND_REVERSE_ENGINEER.md](BACKGROUND_REVERSE_ENGINEER.md) (an index into [`docs/background/`](docs/background/)) document traced functions, memory ranges, and what is still modelled, each one saying which is which.
 
 
@@ -106,12 +108,21 @@ Every setting's name has a tooltip that says what it does and where it comes fro
    - Set the console's state the scene is drawn under: the video output, What's New's board, music playback, Theme Settings' Brightness and Colour, and the background given away to another module.
 
 3. **Interacting with the scene**:
-   - Moving the pointer across the screen steps the XMB's focus over a virtual 7 × 7 grid of icons, as the arrow keys do; each step turns and kicks the sparkles as the D-pad does on the console.
-   - Dragging with the mouse tilts and shakes a virtual Sixaxis.
+
+   | Input | What it does |
+   |---|---|
+   | ← → | Step the XMB's focus sideways, as the D-pad does on the console: held, they turn the sparkles across the screen and stir them up. |
+   | ↑ ↓ | Turn the sparkles up or down the same way. On the console these only scroll the icons; `Vertical Steps` switches back to that. |
+   | A horizontal and a vertical arrow together | Turn the sparkles diagonally. |
+   | Moving the mouse | Pushes the sparkles the pointer passes over, as a moving XMB would; `Pointer Wind` sets how hard, and 0 turns it off. |
+   | Dragging with the mouse | Tilts and shakes a virtual Sixaxis: shaking it stirs the sparkles up, as shaking the controller does on the console. |
 
 4. **UI visibility**:
-   - Each panel has a `Hide` button and a matching `Show ...` button.
-   - `H` hides or shows every control, and the notice at the bottom; opening the page with `?ui=off` starts it without them, for the scene alone - in a frame or as a wallpaper.
+   - Each panel has a `Hide` button, which leaves a `Show ...` button in its place.
+   - `H` hides or shows every panel, and the notice at the bottom.
+
+5. **Page/URL parameters**:
+   - `?ui=off` at the end of the address starts the page without the panels and the notice, for the scene alone - in a frame or as a wallpaper: [faquino.github.io/PlayStation-3-XMB/?ui=off](https://faquino.github.io/PlayStation-3-XMB/?ui=off). `H` brings them back.
 
 
 ## Technical Details (subject to change anytime)

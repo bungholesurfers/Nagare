@@ -86,10 +86,12 @@ sitting in that cell from rest to the pool's median speed, 0.26, in seven frames
 would count 15.9546 / 127, but with `icon wind scl x` at 0 the writer leaves x at 0, as it
 always leaves z.
 
-Still open: how fast the icons move, which sets the values, and whether, within a frame, the
+Not pursued: how fast the icons move, which sets the values, and whether, within a frame, the
 icons write before or after the update decays the grid. The scene reads each icon's place from
 the XMB's own icon objects, through virtual calls, so the easing lives in the XMB rather than in
-`custom_render_plugin`.
+`custom_render_plugin`, and the page recreates the scene, not the XMB: its modelled easing, which
+writes the captures' strongest byte, is taken as it stands - see [Modelled
+choices](implementation.md#modelled-choices).
 
 ## Where the icons are
 

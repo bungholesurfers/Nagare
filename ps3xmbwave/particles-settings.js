@@ -102,8 +102,12 @@ window.PARTICLE_SETTINGS = {
   backgroundFadeMs: 200, // the firmware's callers use 0 to 1000
   flowStrength: 1, // this one is the firmware's, the constant the PPU puts in the block
   iconEaseSec: 0.065, // how fast the modelled icons settle after a step
+  // What up and down steps do: 'turn' the whole field, as left and right do sideways, or 'scroll' the selected
+  // category's items, as on the console, whose dpad scale y of 0 leaves them no turn
+  verticalSteps: 'turn',
   mouseAccelToG: 0.04, // the dragged controller's acceleration, screen heights per second squared, in g
   mouseYawGain: 0.15, // and its sideways speed, screen heights per second, to the gyro's reading
+  pointerWind: 0.5, // how hard the pointer pushes the particles it passes over, 1 being as hard as a moving icon
 };
 
 window.PARTICLE_SETTINGS_META = {
@@ -544,6 +548,14 @@ window.PARTICLE_SETTINGS_META = {
       'icons raise a stronger wind.\n' +
       'Modelled: how the XMB moves its icons is not traced',
   },
+  verticalSteps: {
+    type: 'select', options: [{ value: 'turn', label: 'Turn the field' }, { value: 'scroll', label: 'Scroll items' }],
+    help: 'What the up and down arrows do. Turn: they turn the whole field up or down and kick its drift, as left ' +
+      'and right do sideways, with Dpad Scale X\'s weight; held with a left or right arrow, they turn it ' +
+      'diagonally, no faster than one arrow alone. Scroll: as on the console, whose Dpad Scale Y of 0 ' +
+      "leaves them no turn: they only scroll the selected category's unseen items, which raises a wind under them.\n" +
+      'Page setting: the arrow keys stand in for the D-pad',
+  },
   mouseAccelToG: {
     min: 0, max: 0.2, step: 0.001,
     help: 'How strongly dragging the mouse shakes the virtual controller: an acceleration of one screen height per ' +
@@ -555,5 +567,11 @@ window.PARTICLE_SETTINGS_META = {
     help: 'How strongly dragging sideways turns the virtual controller: a speed of one screen height a second reads ' +
       'this much on its gyro, whose reading runs from -1 to 1.\n' +
       'Page setting: the mouse stands in for the Sixaxis',
+  },
+  pointerWind: {
+    min: 0, max: 1, step: 0.05,
+    help: 'How hard the mouse pointer pushes the particles it passes over: it writes its motion into the flow grid ' +
+      'as a moving icon does, times this, and in both directions where the icons push only up and down. 0 turns ' +
+      'it off.\nPage setting: the console has no pointer',
   },
 };

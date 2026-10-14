@@ -86,7 +86,7 @@ on each frame that passes its draw, simply keeps it that way.
 - **Icons.** A modelled XMB of 10 categories with 8 items each, starting as the resting capture
   does, with four categories to the left of the selection and two items above it. Where each
   icon sits is the captures' - see [Where the icons are](flow-grid.md#where-the-icons-are). How they get
-  there is not measured:
+  there is the XMB's, not measured and not pursued:
   - on a step every icon eases towards its new place, and every category icon towards its new
     height, with a time constant of `iconEaseSec`. At its 0.065 s, the first frame of a step
     writes 58 into the category row, the captures' strongest byte there being 59.
@@ -97,43 +97,12 @@ on each frame that passes its draw, simply keeps it that way.
     not known.
   - A step to the right writes the category row as the captures show it, negative on the
     left of the selection and positive on its right, the shrinking icon's side and the
-    growing one's. A step down writes the item column at +127, since items travel up to a
+    growing one's. Under Scroll a step down writes the item column at +127, since items travel up to a
     third of the screen's height in a few frames.
-- **Input.** The response is ported - see [The controller](controller.md#the-controller). What stands in
-  for the controller is modelled, in `xmb-input.js`:
-  - Steps are D-pad presses: the arrow keys, and the pointer crossing a virtual grid of 7 × 7
-    icons. They reach the system one a frame, the way the XMB sends them. A key the browser
-    starts repeating is held, and the system repeats it every 8 frames of its own, the rate the
-    captures' turn implies. Held for ten seconds, the turn settles between 0.1745 and 0.2010
-    times `dpad rot max`, where the four captures read 0.176 to 0.191.
-  - Every step also moves the modelled icons, whose wind goes through the flow grid, above.
-    Sideways steps raise wind as well as turning the field, as on the console: `icon wind
-    scl x` being 0 means the wind has no x, not that sideways moves raise none.
-  - Dragging with the mouse moves a virtual Sixaxis. The drag's acceleration reads on the
-    accelerometer's x and y, through `mouseAccelToG` and 1 g = 112 of the PPU's units, and its
-    sideways speed reads on the gyro, through `mouseYawGain`. z stays at zero.
-  - **Which way the field turns is measured.** Four captures, two taken holding right and two
-    holding left, carry the rotation at +2.09e-5 and +2.16e-5 against -2.05e-5 and -2.23e-5:
-    right is positive. With the particles six and a half units beyond the centre of the turn,
-    that sweeps them left - the way the icons go. It also dates the savestate taken while
-    navigating: its +1.84e-5 was a step to the right.
-  - Headless, holding a direction for two seconds - a step, then after 30 frames one every 8 -
-    turns the field only from the fourth step on, and until 33 frames after the key is let
-    go. A second after that, the drawn particles' mean has moved by -0.34 in x for right and
-    +0.27 for left. A single tap does not turn the field at all. Down and up move the mean by
-    +0.06 and -0.04 in y: the wind acts only where the icons move.
-  - The vertical sign follows from the traced rule. `dpad scale y` is 0, so the field does not
-    turn when the selection goes up or down; only the wind moves, and a cell takes the sign of
-    the icon's own motion on screen, which M2 turns into a force pointing the same way. So the
-    wind pushes particles the way the icons move, and since pressing down scrolls the items up
-    (inferred from how the XMB scrolls), down pushes them up.
-  - The same two seconds leave the noise at 3.16 times its rest as the key is let go, and 2.74
-    times 0.4 s later; the savestate taken while navigating read 3.19. A tap raises it to 1.25
-    times.
-  - A synthetic shake of the accelerometer's x and the gyro, ±0.4 of the PPU's units at 3 Hz,
-    holds the noise at 6.3 times its rest, against the shaking savestate's 6.63, and turns the
-    field for 20 frames as it starts, against the gyro's reading at that moment. At ±0.05
-    nothing is detected, and the motion alone raises the noise by a third.
+- **Input.** The response is ported - see [The controller](controller.md#the-controller). What
+  stands in for the controller - the arrow keys and the mouse, in `xmb-input.js` - is modelled,
+  and with it the page's own: up and down turning the field, the diagonals, and the pointer's
+  wind - see [The page's input](input.md).
 
 ## Against the console
 

@@ -101,6 +101,7 @@
   // -----------------------------------------------------------------------------------------------------------------
   const CATEGORIES = 10; // the modelled XMB's categories, and the items in each
   const ITEMS = 8;
+  const POINTER_ID = -1; // the page's pointer, among the ids the wind writer remembers icons by
   // The XMB repeats a held direction every 8 frames: the captures taken holding one put the turn's spring between
   // 0.176 and 0.191, which only a step every 8 frames keeps it in. How long it waits before the first repeat is not
   // known; the adapter reports a direction as held once the browser starts repeating its key.
@@ -322,13 +323,13 @@
     const wA = new Float32Array(4);
     const wB = new Float32Array(4);
     const wD = new Float32Array(4);
-    // A frame's input: the D-pad step the XMB sent in it, if any (an index into DPAD_DIRECTIONS, or -1), and the
-    // Sixaxis's reading (null keeps the last one).
-    const noInput = { step: -1, sensor: null };
-    // Steps gathered since the last simulation step, one of them for each step, the direction held, and the newest
-    // reading.
+    // A frame's input: the D-pad step the XMB sent in it, if any (an index into DPAD_DIRECTIONS, or -1), the
+    // Sixaxis's reading (null keeps the last one), and where the page's pointer is (null while it is away).
+    const noInput = { step: -1, sensor: null, pointer: null, diagonal: null };
+    // Steps gathered since the last simulation step, one of them for each step, the direction held, the newest
+    // reading, the pointer, and two arrows held across each other (see diagonalAxis).
     const pendingSteps = [];
-    const frameInput = { step: -1, held: -1, sensor: null };
+    const frameInput = { step: -1, held: -1, sensor: null, pointer: null, diagonal: null };
     let sinceStep = REPEAT_FRAMES;
 
     // The first PARTICLES_SPE.mnu factor, an animation the particle object keeps at +0x140: where it stands, where it
@@ -498,6 +499,11 @@
     // time it sees an icon it only remembers where it is; after that, an icon that has moved writes its motion, times
     // `icon wind` and its two scales, into the cell it is over.
     function iconWind(S, id, x, y) {
+      writeWind(id, x, y, S.iconWind, S.iconWindSclX, S.iconWindSclY, 1);
+    }
+
+    // The writer itself, which the page's pointer shares: `gain` scales the bytes it writes, 1 for an icon.
+    function writeWind(id, x, y, wind, sclX, sclY, gain) {
       if (icons.last.size > ICON_MAP_LIMIT) icons.last.clear();
       const last = icons.last.get(id);
       if (!last) {
@@ -511,10 +517,10 @@
       if (dx === 0 && dy === 0) return;
       const col = clampIndex(Math.trunc((x + 1) * 0.5 * GRID_W), GRID_W - 1);
       const row = clampIndex(Math.trunc((y + 1) * 0.5 * GRID_H), GRID_H - 1);
-      const w = Math.fround(S.iconWind);
+      const w = Math.fround(wind);
       const cell = (row * GRID_W + col) * 3;
-      P.grid[cell] = windByte(Math.fround(Math.fround(dx * ICON_ASPECT) * w) * S.iconWindSclX);
-      P.grid[cell + 1] = windByte(Math.fround(dy * w) * S.iconWindSclY);
+      P.grid[cell] = Math.trunc(windByte(Math.fround(Math.fround(dx * ICON_ASPECT) * w) * sclX) * gain);
+      P.grid[cell + 1] = Math.trunc(windByte(Math.fround(dy * w) * sclY) * gain);
       P.grid[cell + 2] = 0;
     }
 
@@ -528,7 +534,8 @@
         const dir = DPAD_DIRECTIONS[ev.step];
         icons.category = Math.min(Math.max(icons.category + dir[0], 0), CATEGORIES - 1);
         const i = icons.category;
-        icons.item[i] = Math.min(Math.max(icons.item[i] - dir[1], 0), ITEMS - 1); // down selects the next item
+        // Down selects the next item, unless the page has up and down turn the field instead (`verticalSteps`).
+        if (S.verticalSteps !== 'turn') icons.item[i] = Math.min(Math.max(icons.item[i] - dir[1], 0), ITEMS - 1);
       }
       const c = icons.category;
       const k = 1 - Math.exp(-1 / (STEP_HZ * Math.max(S.iconEaseSec, 0.001)));
@@ -547,6 +554,36 @@
         icons.itemY[j] += (itemTargetY(j, selected) - icons.itemY[j]) * k;
         iconWind(S, CATEGORIES + c * ITEMS + j, icons.x[c], icons.itemY[j]);
       }
+    }
+
+    // --- The page's own: the pointer, which the console does not have -------------------------------------------
+    // It stirs the particles it passes over through the icons' writer, in both directions - an icon's x counts for
+    // nothing while `icon wind scl x` is 0 - and its bytes times `pointerWind`. Away, it is forgotten, so coming back
+    // writes nothing until it moves.
+    function pointerWind(S, p) {
+      if (!p || !(S.pointerWind > 0)) {
+        icons.last.delete(POINTER_ID);
+        return;
+      }
+      writeWind(POINTER_ID, p[0], p[1], S.iconWind, 1, 1, Math.min(S.pointerWind, 1));
+    }
+
+    // Two arrows held across each other, under `verticalSteps`' Turn. The XMB sends one direction a step and the turn
+    // takes the last step's axis; here each step's axis becomes the diagonal between the two, scaled to a single
+    // step's length, so the field turns no faster than for one direction. Each step still kicks the noise as its own
+    // direction does.
+    function diagonalAxis(S, diagonal) {
+      if (!diagonal || S.verticalSteps !== 'turn') return;
+      const across = DPAD_DIRECTIONS[diagonal[0]];
+      const upDown = DPAD_DIRECTIONS[diagonal[1]];
+      const ax = -upDown[1] * S.dpadScaleY;
+      const ay = across[0] * S.dpadScaleX;
+      const length = Math.hypot(ax, ay);
+      if (!(length > 0)) return;
+      const k = Math.max(Math.abs(S.dpadScaleX), Math.abs(S.dpadScaleY)) / length;
+      model.dpadAxis[0] = ax * k;
+      model.dpadAxis[1] = ay * k;
+      model.dpadAxis[2] = 0;
     }
 
     // --- Verified: the parameter block, as 0x31494 fills it, and the controller's part in it --------------------
@@ -656,6 +693,7 @@
       readSensor(ev);
       const r = P.fieldRotation;
       const dpadRate = dpad(S, ev.step);
+      if (ev.step >= 0) diagonalAxis(S, ev.diagonal); // the page's own, below
       r[0] = model.dpadAxis[0] * dpadRate;
       r[1] = model.dpadAxis[1] * dpadRate;
       r[2] = model.dpadAxis[2] * dpadRate;
@@ -828,11 +866,15 @@
     }
 
     // The parameters with the factors as they stand, then the block, decaying the grid, then the icons' wind on top of
-    // it (which of those two comes first within a frame on the console is not known), and the fades move on last.
+    // it (which of those two comes first within a frame on the console is not known) and the pointer's, and the fades
+    // move on last.
     function step(settings, height, ev) {
       const S = applySpe(settings, spe.value, height, effective);
+      // The page's own: up and down weigh in the turn as left and right do, where the console's 0 leaves them none.
+      if (S.verticalSteps === 'turn') S.dpadScaleY = S.dpadScaleX;
       buildParams(S, ev);
       moveIcons(S, ev);
+      pointerWind(S, ev.pointer);
       emit(S);
       runTask();
       speAdvance();
@@ -849,6 +891,8 @@
       for (let i = 0; i < ev.steps.length && pendingSteps.length < 8; i++) pendingSteps.push(ev.steps[i]);
       frameInput.held = ev.held >= 0 ? ev.held : -1;
       if (ev.sensor) frameInput.sensor = ev.sensor;
+      frameInput.pointer = ev.pointer || null;
+      frameInput.diagonal = ev.diagonal || null;
     }
 
     // This frame's step: the next one sent, or a held direction's repeat (modelled).

@@ -28,6 +28,7 @@ index. Read it first, then only the topics the task needs - see
 | [`emitter.md`](docs/particles/emitter.md) | The wave the particles are born on, the emitter and its random numbers, the pool's commands, what the pool says |
 | [`controller.md`](docs/particles/controller.md) | How D-pad steps and the Sixaxis reach the scene, and what they do to the field and the noise |
 | [`implementation.md`](docs/particles/implementation.md) | What `ps3xmbwave/` models and why, and how it compares with the console |
+| [`input.md`](docs/particles/input.md) | What stands in for the controller on the page - the arrow keys, their diagonals and `verticalSteps`, the mouse's drag and pointer - and how the field answers |
 | [`history.md`](docs/particles/history.md) | Superseded readings, closed investigations and dead ends, for reopening a question |
 
 ## Status
@@ -37,18 +38,15 @@ What `ps3xmbwave/` ports as verified and what it models, file by file;
 
 | File | Verified | Modelled |
 |---|---|---|
-| `particles-reverse.js` | The update task, steps 1 to 8. The pool layout, free marker, life bounds and camera. The parameter block: its layout, the values at every offset, and how the PPU fills it, the flow grid and the noise included. The emitter and its random numbers, on the vertices of the wave `wave-reverse.js` builds. The controller's response: the D-pad's turn and kicks, the motion, the shake detectors. `PARTICLES_SPE.mnu`, as the PPU applies it, and its first factor's animation. The particles' fade, `_Color`. The icons' layout on screen, measured. | How the icons move; how often the XMB repeats a held direction; the pool's first orientations, uniform as the console's are after many generations. |
+| `particles-reverse.js` | The update task, steps 1 to 8. The pool layout, free marker, life bounds and camera. The parameter block: its layout, the values at every offset, and how the PPU fills it, the flow grid and the noise included. The emitter and its random numbers, on the vertices of the wave `wave-reverse.js` builds. The controller's response: the D-pad's turn and kicks, the motion, the shake detectors. `PARTICLES_SPE.mnu`, as the PPU applies it, and its first factor's animation. The particles' fade, `_Color`. The icons' layout on screen, measured. | How the icons move; how often the XMB repeats a held direction; up and down turning the field, the page's choice; the pool's first orientations, uniform as the console's are after many generations. |
 | `particles.js` | Both passes, re-authored from the decompiled programs, fed with the `.mnu` values [`shaders.md`](docs/particles/shaders.md) maps to uniforms, `PARTICLES_SPE.mnu` applied. `color_control` as the programs use it, and `_Color` from the system's fade. | `_Gamma` held at 1, its value in every savestate. The iridescent texture comes from the fit. |
 | `scene-themes.js` | The nine distinct theme sets, as their differences from the base, and every set's `LINE1.mnu` for the wave. The boot sequences: which set each step puts in, when, and over how long, and the XMB's start ending on the clock's first tick after `ShowGUI`. The music, and Theme Settings' Colour. The scene's fade, sent to the particles and the wave alike. [The day's schedule](docs/particles/day-cycle.md) and every blend's curve. | The clock's tick, taken at once; the blends' windows on the page's seconds - see [How one set blends into another](docs/particles/day-cycle.md#how-one-set-blends-into-another); the music player's visualizer calling 0.09 s after the music starts - see [The music set](docs/particles/music.md). |
-| `xmb-input.js` | What it hands over: steps with the XMB's four directions, and the four sensors in the PPU's units. | The rest: the mouse and keyboard stand in for the controller. |
+| `xmb-input.js` | What it hands over: steps with the XMB's four directions, and the four sensors in the PPU's units. | The rest: the mouse and keyboard stand in for the controller. The pointer, which writes the flow grid as an icon does, is the page's own. |
 
 ## Still missing
 
 The implementation models all of these:
 
-- How the icons move, which sets the flow grid's values. The rule that writes the cells and where
-  the icons sit are ported - see [The flow grid](docs/particles/flow-grid.md#the-flow-grid) - and
-  the easing between places is modelled. The XMB moves them, not the scene.
 - When the XMB sends a step. Every step's effect is ported - see [The
   controller](docs/particles/controller.md#the-controller) - and a held direction repeating every 8
   frames is inferred from the captures; how long the XMB waits before the first repeat is not known.

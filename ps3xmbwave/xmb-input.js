@@ -1,10 +1,8 @@
 'use strict';
-// Mouse and keyboard stand-in for the controller: the pointer crossing a virtual icon grid and the arrow keys send
-// D-pad steps, dragging moves a virtual Sixaxis. Created by `index.html`, polled by `particles-reverse.js`.
+// Mouse and keyboard stand-in for the controller: the arrow keys send D-pad steps, dragging moves a virtual Sixaxis,
+// and the pointer's place goes to the flow grid. Created by `index.html`, polled by `particles-reverse.js`.
 
 (function () {
-  const ICON_COLUMNS = 7; // category icons across the screen
-  const ICON_ROWS = 7; // item icons down the screen
   // The XMB's step directions, in the order the particle system takes them.
   const LEFT = 0;
   const RIGHT = 1;
@@ -17,12 +15,14 @@
   const DRAG_SMOOTHING_SEC = 0.03;
 
   window.createXmbInput = function createXmbInput(canvas, settings) {
-    let slotX = null;
-    let slotY = null;
+    // Where the pointer is, in normalised device coordinates with y up, while it is over the scene and not dragging.
+    let pointer = null;
     const steps = []; // directions sent since the last poll
-    // The arrow key being held, once the browser starts repeating it: the XMB repeats it from then on, in the
-    // particle system, which counts the console's frames.
-    let held = -1;
+    // The arrow keys down, oldest first, and whether the browser has started repeating one: from then on the newest
+    // of them is held, which the XMB repeats in the particle system, counting the console's frames. Letting it go
+    // hands the hold to the one before it, if that is still down - the browser repeats only the last key pressed.
+    const down = [];
+    let repeating = false;
     let dragging = false;
     let lastX = 0;
     let lastY = 0;
@@ -46,6 +46,7 @@
     canvas.addEventListener('pointerdown', function (e) {
       if (e.button !== 0) return;
       dragging = true;
+      pointer = null;
       lastX = e.clientX;
       lastY = e.clientY;
       canvas.setPointerCapture(e.pointerId);
@@ -56,7 +57,9 @@
     canvas.addEventListener('pointercancel', endDrag);
     window.addEventListener('blur', function () {
       endDrag();
-      held = -1;
+      down.length = 0;
+      repeating = false;
+      pointer = null;
     });
 
     window.addEventListener('pointermove', function (e) {
@@ -69,37 +72,36 @@
         return;
       }
       if (overUi(e.target)) {
-        slotX = slotY = null;
+        pointer = null;
         return;
       }
-      const sx = Math.floor((e.clientX / (window.innerWidth || 1)) * ICON_COLUMNS);
-      const sy = Math.floor((e.clientY / h) * ICON_ROWS);
-      if (slotX !== null && sx !== slotX) send(sx > slotX ? RIGHT : LEFT, Math.abs(sx - slotX));
-      if (slotY !== null && sy !== slotY) send(sy > slotY ? DOWN : UP, Math.abs(sy - slotY));
-      slotX = sx;
-      slotY = sy;
+      pointer = [(e.clientX / (window.innerWidth || 1)) * 2 - 1, 1 - (e.clientY / h) * 2];
     });
 
-    window.addEventListener('pointerleave', function () { slotX = slotY = null; });
+    document.documentElement.addEventListener('pointerleave', function () { pointer = null; });
 
     window.addEventListener('keydown', function (e) {
       if (overUi(document.activeElement)) return;
       const dir = KEYS[e.key];
       if (dir === undefined) return;
       if (!e.repeat) {
+        if (down.indexOf(dir) < 0) down.push(dir);
         send(dir, 1);
-        held = -1;
+        repeating = false;
       } else {
-        held = dir;
+        repeating = true;
       }
     });
 
     window.addEventListener('keyup', function (e) {
-      if (KEYS[e.key] === held) held = -1;
+      const i = down.indexOf(KEYS[e.key]);
+      if (i >= 0) down.splice(i, 1);
+      if (!down.length) repeating = false;
     });
 
-    // Called once per rendered frame: the steps sent since the last call, the direction held, and the Sixaxis's
-    // reading.
+    // Called once per rendered frame: the steps sent since the last call, the direction held, the Sixaxis's reading,
+    // where the pointer is, and the diagonal - a horizontal and a vertical arrow down together, as [horizontal,
+    // vertical] - or null.
     function poll(dtSec) {
       const dt = Math.max(dtSec, 1e-3);
 
@@ -119,7 +121,15 @@
       sensor[2] = 0;
       sensor[3] = clamp1(velX * settings.mouseYawGain);
 
-      const out = { steps: steps.slice(), held, sensor };
+      const held = repeating && down.length ? down[down.length - 1] : -1;
+      let across = -1;
+      let upDown = -1;
+      for (const d of down) {
+        if (d === LEFT || d === RIGHT) across = d;
+        else upDown = d;
+      }
+      const diagonal = across >= 0 && upDown >= 0 ? [across, upDown] : null;
+      const out = { steps: steps.slice(), held, sensor, pointer: pointer && pointer.slice(), diagonal };
       steps.length = 0;
       return out;
     }

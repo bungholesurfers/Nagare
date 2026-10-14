@@ -87,8 +87,10 @@ The simulation steps at a fixed 60 Hz, because the task's semantics are per fram
 
 `xmb-input.js` stands in for the controller, so the web page has something to react to; what it hands over is the console's own input:
 
-- the pointer crossing a virtual 7 × 7 icon grid, and the arrow keys, send D-pad steps in the XMB's four directions, and a key the browser repeats is reported as held — the simulation repeats it every 8 of its frames, as the captures imply;
+- the arrow keys send D-pad steps in the XMB's four directions, and a key the browser repeats is reported as held — the simulation repeats it every 8 of its frames, as the captures imply. Up and down turn the field as left and right do (`verticalSteps`, the page's choice: the console's `dpad scale y` of 0 has them only scroll its items), and a horizontal and a vertical arrow held together turn it about the diagonal, no faster than one direction — `docs/particles/input.md` has the page's input;
 - dragging with the mouse moves a virtual Sixaxis, reported as the four sensors the PPU reads (the accelerometer's x, y and z, and the gyro) in its own units.
+
+It also hands over where the pointer is, which the console has no counterpart for: the system writes its motion into the flow grid through the icons' own writer, in both directions and times `pointerWind`, so it pushes the particles it passes over as a moving icon would.
 
 The system polls it once per frame and hands the steps to the simulation one per step, as the XMB sends them.
 
