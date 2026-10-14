@@ -73,9 +73,9 @@ another](../particles/day-cycle.md#how-one-set-blends-into-another) - and, throu
 - **The passes after the wave, in their details.** The wave's buffer is read through a bilinear
   filter where the console's texture unit applies a convolution; the six levels of the glare are
   added in one pass, not six, and its textures are clamped to their edge, as RPCS3 runs their
-  CLAMP; the luminance the glare's source carries, and the copy the CPU fetches for statistics
-  nothing uses, are left out; and `_Gamma` is held at 1, its value in every savestate, as the
-  particles' is. The noise's counter starts with the page, as the console's does with the scene.
+  CLAMP; and the luminance the glare's source carries, and the copy the CPU fetches for statistics
+  nothing uses, are left out. The noise's counter starts with the page, as the console's does with
+  the scene.
   `HDR.mnu`'s flags are not applied - only the welcome sets change them. The backdrop that goes
   into the passes is the console's program over fits of its month textures - see the [backdrop
   notes](../../BACKGROUND_REVERSE_ENGINEER.md).

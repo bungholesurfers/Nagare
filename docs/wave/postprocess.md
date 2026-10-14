@@ -89,11 +89,11 @@ holding:
 - the mask, (y - `GLARE THRESH`) y / (8 min(y, 1)), y without `_Gamma`, at the larger of its two
   coordinates - 0 / 0 at texel 0.
 
-`_Gamma` is the value the scene picks by a system setting and sends the particles too (`0x1b128`,
-`0x70bf8`) - see [Uniform values at run time](../particles/shaders.md#uniform-values-at-run-time).
-It is 1 in every savestate, and the curve fits every capture's tables to a step of half precision
-(three in two taken mid-blend), the cold boot's included, where W runs from 0.90 to 1, and the mask
-to a few, most where it crosses 0. In yoake's, higure's and night's sets W is 0.999878, which makes
+`_Gamma` is the colour `paf` draws the interface with, 0.8 on an SD output and 1 above, which the
+scene sends the particles too (`0x1b128`, `0x70bf8`) - see [Uniform values at run
+time](../particles/shaders.md#uniform-values-at-run-time). It is 1 in every savestate, and the
+curve fits every capture's tables to a step of half precision (three in two taken mid-blend), the
+cold boot's included, where W runs from 0.90 to 1, and the mask to a few, most where it crosses 0. In yoake's, higure's and night's sets W is 0.999878, which makes
 the curve a straight line: the composite just multiplies by `EXPOSURE`. In the base set, which is
 day's, W = 0.899 and the curve brightens what is already bright.
 

@@ -2,7 +2,7 @@
 // The scene's parameter sets: how each firmware override/<set>/PARTICLES.mnu, LINE1.mnu, HDR.mnu and BACKGROUND.mnu
 // differs from the base one, and the blend that walks the day, the boot sequences, the music and the scene's clock,
 // which put them into the particles' and the wave's settings. Read at load by `particles-settings.js`, applied from
-// `index.html`, which also hands the backdrop (`spline.js`) the clock and both layers the scene's fade.
+// `index.html`, which also hands the backdrop (`spline.js`) the clock and both layers the scene's fade and _Gamma.
 
 // The particle side. Some numbered sets repeat there: welcome_2's particles equal welcome_1's, coldboot2's equal
 // coldboot1's, and gameboot4 is gameboot3 with `global alpha` 0, like black is music with it - so the repeats are
@@ -437,6 +437,15 @@ window.PARTICLE_THEME_OPTIONS = [
       send(hidden ? 0 : brightness, Math.max(0, Number(scene.backgroundFadeMs) || 0) / 1000);
     }
     return sent;
+  };
+
+  // _Gamma, which the scene's update (0x14578) hands the particles and the wave's renderer alike, at once, whenever it
+  // changes (0x1b128, 0x70bf8): the colour paf draws the whole interface with, which vsh.elf sets as it applies the
+  // video mode (0xc75e4) - SD_GAMMA on an SD resolution, 480 or 576 lines, and 1 above. A paf widget can stand in for it
+  // while it is drawn (0x3e37b8), which the page has none of.
+  const SD_GAMMA = 0.8; // 0x66aac0
+  window.xmbSceneGamma = function xmbSceneGamma(scene) {
+    return (Number(scene.videoOutput) || 1080) < 720 ? SD_GAMMA : 1;
   };
 
   // What the theme asks for now: music_1 while the music is in, the base while it goes out, and otherwise what

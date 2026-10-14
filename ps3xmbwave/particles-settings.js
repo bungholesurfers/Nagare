@@ -85,7 +85,9 @@ window.PARTICLE_SETTINGS = {
   iconWindSclY: 1,
 
   // --- Console output, modelled PPU side and mouse adapter (not from the firmware) ------------
-  videoOutput: '1080', // the console's video output: below 1080p the particles grow and fade (PARTICLES_SPE.mnu)
+  // the console's video output: below 1080p the particles grow and fade (PARTICLES_SPE.mnu), and on SD the whole scene
+  // dims (_Gamma)
+  videoOutput: '1080',
   // What's New's board (wboard_plugin) opening its list: over 2 s the particles speed up and glint more
   // (PARTICLES_SPE.mnu), and closing it takes them back
   whatsNewBoard: 'closed',
@@ -487,8 +489,9 @@ window.PARTICLE_SETTINGS_META = {
     type: 'select',
     options: [{ value: '1080', label: '1080p' }, { value: '720', label: '720p' }, { value: '480', label: 'SD' }],
     help: "The console's video output: below 1080p the flakes in focus are drawn bigger and all the particles " +
-      'fainter - at the defaults, a fifth bigger and 28% fainter at 720p, two fifths bigger and 56% fainter on SD.\n' +
-      "Console state: PARTICLES_SPE.mnu's second factor",
+      'fainter - at the defaults, a fifth bigger and 28% fainter at 720p, two fifths bigger and 56% fainter on SD - ' +
+      'and on SD the whole scene is drawn at 0.8, under the colour the interface is drawn with.\n' +
+      "Console state: PARTICLES_SPE.mnu's second factor, and paf's colour on SD (_Gamma)",
   },
   whatsNewBoard: {
     hidden: "Closed: which of the XMB's actions open the board is not pursued (docs/particles/scene-events.md), and " +

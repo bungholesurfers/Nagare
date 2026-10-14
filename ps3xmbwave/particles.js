@@ -351,6 +351,7 @@
     const modelView = new Float32Array(16);
     const mvp = new Float32Array(16);
     const eye = RE.CAMERA.eye;
+    let gammaValue = 1; // _Gamma, as the frame was handed it
 
     function setUniforms(u, s) {
       gl.uniformMatrix4fv(u.uMVP, false, mvp);
@@ -372,16 +373,18 @@
       gl.uniform4f(u.uGlare, s.glare, s.glareScale, s.glareP1, s.glareP2);
       gl.uniform1f(u.uIridescentExp, s.iridescentExp);
       gl.uniform1f(u.uColorControl, s.colorControl);
-      // _Color is the scene's fade, which the system runs; _Gamma is a value the scene picks by a system setting, 1 in
-      // every savestate.
+      // _Color is the scene's fade, which the system runs; _Gamma the colour paf draws the interface with, which the
+      // scene hands the particles and the wave's renderer alike (0x1b128): 0.8 on an SD output, 1 above.
       const c = system.colorFade.value;
       gl.uniform3f(u.uColor, c, c, c);
-      gl.uniform1f(u.uGamma, 1);
+      gl.uniform1f(u.uGamma, gammaValue);
       gl.uniform1i(u.uIridescent, 0);
     }
 
-    // `fade` is the scene's fade as `xmbSceneFade` last sent it, which the system's _Color runs.
-    function render(waveTimeSec, dtSec, fade) {
+    // `fade` is the scene's fade as `xmbSceneFade` last sent it, which the system's _Color runs, and `gamma` its _Gamma
+    // (`xmbSceneGamma`).
+    function render(waveTimeSec, dtSec, fade, gamma) {
+      gammaValue = gamma === undefined ? 1 : gamma;
       // A hidden page can report an empty canvas; emitting then would put every particle on the axis.
       if (!canvas.width || !canvas.height) return;
       const aspect = canvas.width / canvas.height;

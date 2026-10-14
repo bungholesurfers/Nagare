@@ -25,7 +25,9 @@ in milliseconds, by 1000 before it starts the same kind of animation.
   width, height and aspect, passes them to the particle object, and then sets the factor at
   once (`0x1acb4`) by the height: 0 above 1079 lines, 0.5 above 719, 1 below. So on a 720p
   output `size middle` grows by a fifth and `global alpha` drops to 0.72, and on SD by two
-  fifths and to 0.44: bigger, fainter particles where each covers fewer pixels.
+  fifths and to 0.44: bigger, fainter particles where each covers fewer pixels. On SD the whole
+  scene is drawn at 0.8 as well, under the colour `paf` draws the interface with - see [Uniform
+  values at run time](shaders.md#uniform-values-at-run-time).
 
 Every capture was taken at 1920 × 1080, and all 23 with particles in them carry both factors at
 zero: `glare`, `global alpha` and `size middle` sit exactly on the set blend, across rest,

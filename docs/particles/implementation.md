@@ -41,7 +41,9 @@ on each frame that passes its draw, simply keeps it that way.
   [The controller](controller.md#the-controller).
 - **`PARTICLES_SPE.mnu`.** Applied every frame the way `0x31f44` applies it, clamps included,
   to what the simulation runs on and the shaders draw with. The video output's factor comes
-  from `videoOutput`, 1080p by default as in every capture. The event factor runs the
+  from `videoOutput`, 1080p by default as in every capture, and so does `_Gamma`, 0.8 on SD,
+  which `xmbSceneGamma` hands both layers - see [Uniform values at run
+  time](shaders.md#uniform-values-at-run-time). The event factor runs the
   firmware's animation, towards 1 while `whatsNewBoard` is open and towards 0 while it is
   closed, as events 11 would take it; closed is the default, as in every capture, and the
   setting stays off the panel, its question closed - see [What's New's

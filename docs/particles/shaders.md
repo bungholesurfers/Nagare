@@ -44,7 +44,7 @@ microcode as it was uploaded, so its cache holds the values the XMB used.
 | `_Glare` | (0.201367, 5.44386, 0.99, 4.44) | `glare`, `glare scale`, `glare p1`, `glare p2` |
 | `_IridescentExp` | 1 | `iridescent exp` |
 | `_Color` | (1, 1, 1) | a fade the scene runs, not a parameter |
-| `_Gamma` | 1 | a value the scene picks by a system setting |
+| `_Gamma` | 1 | the colour `paf` draws the interface with: 0.8 on an SD output, 1 above |
 
 **Verified: where `color_control`, `_Color` and `_Gamma` come from.** The particle draw
 (`0x5c254`) packs `lambert coeff`, `specular coeff`, `exposure` and `color_control` into
@@ -58,9 +58,28 @@ savestate:
   with a duration of zero) whenever the value it picks changes: the first word of `paf`'s
   variable `59df89eb` when the word 12 bytes into it is above 0.05, and of `paf`'s `6fd42f46`
   otherwise. The loader patches the two in from the import table, which is why they once read
-  as absolute addresses; what `paf` keeps in them is not followed. The same value goes to the
-  wave's HDR renderer (`0x70bf8`), whose tables multiply the composite's tone curve by it - see
-  [The preexpose tables](../wave/postprocess.md#the-preexpose-tables). It is 1 in every savestate.
+  as absolute addresses. The same value goes to the wave's HDR renderer (`0x70bf8`), whose
+  tables multiply the composite's tone curve by it - see [The preexpose
+  tables](../wave/postprocess.md#the-preexpose-tables).
+
+**Verified: what `paf` keeps in the two.** `paf` is the XMB's interface library, which `vsh.elf`
+exports itself (973 functions and 43 variables); the two are its variables at `0x731b28` and
+`0x731b48`, read through its export table (`0x641eb8`).
+
+- `6fd42f46` is the colour `paf` draws the whole interface with. Its setter (`0x374aa0`, exported
+  as `60cf1b3c`) keeps it there and hands it to every object on a list of `paf`'s (`+0x2a4`).
+  `vsh.elf` calls it as it applies the video mode (`0xc75e4`, from `0xc767c` and `0xd3be8`): (0.8,
+  0.8, 0.8, 1) for the mode codes 3 to 7 (0.8 at `0x66aac0`), (1, 1, 1, 1) for the others. The codes
+  come from the resolution (`0xc56f4`): 480 lines give 3 or 4, 576 give 6 or 7, 720 give 8, 9 or
+  0xb, 1080 give 0xa or 0xc. So on an SD output the scene is drawn at 0.8, particles and tone curve
+  alike, and at 1 above. Remote Play (`premo_plugin`, `0x4534`) is the only other caller.
+- `59df89eb` is a stand-in: a kind of `paf` widget, as it is drawn visible (`0x3e37b8`, and a
+  sibling class's `0x3e39b8`), splats its float property 0x51 (`+0x94`, set by `0x3e2d58`) into
+  it when that is 0.05 or more, and puts (1, 1, 1, 0) back when it is -0.5 or less. Which of the
+  interface's pages carry such a widget is the interface's doing, not the scene's, and is not
+  pursued.
+
+Every savestate holds (1, 1, 1, 0) and (1, 1, 1, 1): `_Gamma` is 1, at 1080p.
 
 Vertex uniforms live in constant registers and are not in the cache. Their values come
 from the RSX frame captures below; their meaning from the decompiled vertex shader.

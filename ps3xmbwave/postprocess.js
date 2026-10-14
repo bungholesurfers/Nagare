@@ -18,14 +18,14 @@
 
   // HDR.mnu's and BACKGROUND.mnu's settings as the passes' uniforms, worked out the way the console's are (each read
   // back out of every frame capture; see the wave notes' postprocess.md):
-  // - the tone curve x (1 + x / W^2) / (1 + x), W being WHITE LEVEL, at EXPOSURE times the light, times _Gamma, a value
-  //   the scene picks by a system setting (0x1b128), 1 in every savestate, which the tables hold the curve times
-  //   (0x71794) and the particles take too;
+  // - the tone curve x (1 + x / W^2) / (1 + x), W being WHITE LEVEL, at EXPOSURE times the light, times _Gamma, `gamma`,
+  //   the colour paf draws the interface with, which the scene hands the renderer (0x70bf8) and the particles too -
+  //   0.8 on an SD output and 1 above (`xmbSceneGamma`) - and the tables hold the curve times (0x71794);
   // - each channel's Gaussian, exp(-k^2 / 2 RAD^2) normalised over |k| <= floor(3 RAD - 1), at most 7 texels;
   // - the six levels' weights, GLARE LEVEL^2 SUM POW^l / (1 + SUM POW + ... + SUM POW^5), l = 0 the finest;
   // - _GlareWeight, 1 in every set;
   // - BACKGROUND.mnu's four colours times the renderer's fade, `fade`, as each frame sets them (0x4fec8 to 0x50000).
-  function uniforms(settings, fade) {
+  function uniforms(settings, fade, gamma) {
     const f = fade === undefined ? 1 : fade;
     const white = settings.whiteLevel;
     const gauss = [];
@@ -49,7 +49,7 @@
     return {
       exposure: settings.exposure,
       whiteSqrRcp: white !== 0 ? 1 / (white * white) : 0,
-      gamma: 1,
+      gamma: gamma === undefined ? 1 : gamma,
       threshold: settings.glareThresh,
       gauss,
       levels,
@@ -359,10 +359,10 @@
     }
 
     // Runs the passes and leaves the result in the canvas, at `width` x `height`, for the particles to draw over, with
-    // the colours dimmed by the renderer's fade, `fade`.
-    function present(settings, width, height, fade) {
+    // the colours dimmed by the renderer's fade, `fade`, and the tone curve times _Gamma, `gamma`.
+    function present(settings, width, height, fade, gamma) {
       resize(width, height);
-      const u = uniforms(settings, fade);
+      const u = uniforms(settings, fade, gamma);
       gl.disable(gl.BLEND);
       gl.disable(gl.DEPTH_TEST);
       gl.bindVertexArray(quad);

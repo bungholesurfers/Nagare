@@ -57,6 +57,13 @@ relocations, so in the disassembly they read as small absolute addresses (`0x30(
 instructions patched with each one's address, and those it exports, with where each lives and its
 first words - so, run on the exporting module, it gives a variable's starting value.
 
+`paf` is exported by `vsh.elf` itself, an executable with no module info record, so `vars` lists
+none of its exports. Its export table is found instead by its 0x1c-byte entries, the one naming
+`paf` at `0x641eb8`, whose NID and address tables give each variable's and function's place.
+`vsh.elf` is not relocated, so a savestate holds the variable at that very address
+(`savestate.py <savestate> read 0x731b28 0x40`), and the code that writes it reaches it by a
+`lis`/`addi` pair with those halves.
+
 ## Savestates
 
 RPCS3 can save the emulated machine's state while the XMB runs (*File → Create

@@ -246,9 +246,9 @@
     }
 
     // `moment` is the moment the scene last handed the backdrop (`xmbBackdropMoment`), `sequence` the boot sequence
-    // playing - the XMB's start resets the lines, as the cold boot's handlers do (0x1b05c) - and `sent` the fade the
-    // scene last sent (`xmbSceneFade`).
-    function render(timeSec, moment, sequence, sent) {
+    // playing - the XMB's start resets the lines, as the cold boot's handlers do (0x1b05c) - `sent` the fade the
+    // scene last sent (`xmbSceneFade`), and `gamma` its _Gamma (`xmbSceneGamma`), which the tone curve is drawn times.
+    function render(timeSec, moment, sequence, sent, gamma) {
       const dtSec = lastTime === null ? 0 : Math.max(0, timeSec - lastTime);
       lastTime = timeSec;
       if (sequence !== undefined && sequence !== lastSequence) {
@@ -293,7 +293,7 @@
       });
 
       // The composite, the tone curve and the glare, into the canvas.
-      post.present(settings, canvas.width, canvas.height, fade.value);
+      post.present(settings, canvas.width, canvas.height, fade.value, gamma);
     }
 
     // The mesh is rewritten in place every frame, so the surface always holds what was drawn.
