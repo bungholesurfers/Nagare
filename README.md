@@ -167,4 +167,3 @@ Found a bug or something that looks different from the console? [Open an issue o
 
 - Find what keeps a run of the lines from the reset from landing exactly on a savestate - see [WAVE_REVERSE_ENGINEER.md](WAVE_REVERSE_ENGINEER.md#still-missing).
 - Find what starts `anim_coldboot` and who sends the scene its events 2 and 3 - see [PARTICLES_REVERSE_ENGINEER.md](PARTICLES_REVERSE_ENGINEER.md#still-missing).
-- Catch the backdrop's ease in a frame capture, to confirm the copy it starts from - see [BACKGROUND_REVERSE_ENGINEER.md](BACKGROUND_REVERSE_ENGINEER.md#still-missing).

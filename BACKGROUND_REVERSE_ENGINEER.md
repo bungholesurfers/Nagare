@@ -48,12 +48,8 @@ What `ps3xmbwave/` ports as verified and what it models, file by file;
 
 ## Still missing
 
-The implementation models all of these. They are listed roughly by how much each one changes the
-backdrop on screen:
-
-- **The copy the ease starts from.** That `0x52784` copies the backdrop as it stands is read from
-  the code's shape; no capture caught a frame with that copy in it - see
-  [`_Alpha`](docs/background/uniforms.md#_alpha).
+Nothing is open. The last question, the copy each ease starts from, is read from the code, borne out
+by a screenshot and not pursued further - see [`_Alpha`](docs/background/uniforms.md#_alpha).
 
 ## Keeping these notes
 

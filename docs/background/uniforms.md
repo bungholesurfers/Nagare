@@ -81,8 +81,17 @@ with it, a change of `COLOUR SHADER` (`0x4fdf0`) to 2 seconds, and both zero the
 (`0x52ef0`), if the timer is 0 the 64 × 32 buffer is first copied into another (`0x52784`); then that
 copy is drawn into the buffer (draw 0, `Copy` from `0x2c02600`) and the program over it (draw 1),
 blended by `_Alpha`, the smoothstep of the timer over the length (`0x453ac`); and the timer moves on
-by the frame's time until it reaches one and a half lengths. That the copy is of the buffer as it
-stands is read from the code's shape: no capture caught a frame with it.
+by the frame's time until it reaches one and a half lengths.
+
+That the copy is of the buffer as it stands is read from the code: `0x52784` is a draw of its own,
+64 × 32, into the copy. No capture holds it, and none is pursued. It runs on an ease's first frame
+alone, one in 60 at rest, and of the 25 captures that draw the backdrop the nearest are two and three
+frames after it, at `_Alpha` 0.003259 and 0.00725; nor can a capture show what the copy holds, since
+RPCS3 keeps render targets on the GPU. A screenshot bears it out instead: under a second into the
+music's way out, the one of 11:50:20 on 3 October has `back_colours0`'s amber easing in over the
+music's backdrop, which the page's ease from the buffer as it stood gives to 6 levels (rms) - see
+[What the recreation does](implementation.md#what-the-recreation-does). At rest the copy is the
+backdrop of a second before, which the new moment differs from by that second of the day.
 
 So at rest, with the clock's tick every second over a second, `_Alpha` is the smoothstep of n / 60
 at 60 frames a second, n a whole number: 20/27 is the smoothstep of 2/3, 0.104 of 1/5, 0.71825 of
