@@ -29,7 +29,7 @@ While this is inspired by the official PlayStation 3 XMB background wave design,
 - **Reverse-engineered wave**: `wave-reverse.js` builds the wave the way the console does - the PPU's simulation of 19 lines, the GPU's deformation lattice and the SPU's B-spline surface - into the console's own 128 × 128 mesh, and `spline.js` draws it with the XMB's line programs re-authored in GLSL. The firmware's parameter sets move it as they move the particles: through the day, the XMB's start, a game's launch and the music. The scene's fade - Theme Settings' Brightness, or another module taking the screen - dims it with the backdrop and the sparkles, as the console's does.
 - **WebGL2 renderer**: Pure WebGL2 rendering path (backdrop + wave mesh + the passes after it + particles), no framework dependency.
 - **The console's backdrop**: the default, `Auto (date and time)`, runs the XMB's own backdrop program, re-authored, over fits of its month textures: this month's and next month's colours taken through hue, saturation and value, lit by clocks that run through the day with two glows going round, next month wiped in up the screen as the month goes on, and the night's textures mixed in by the hour. Under the music it switches, as the console does, to the console's other program. The 12 month gradients with day/night variants, and an "Original (RGB Sliders)" mode, remain as presets.
-- **Live control panels**: separate spline and particle panels with a slider or select per setting, named after the firmware's own parameters. Tooltips indicate what each setting does and where it comes from; a reset per row, a lock that keeps a value from the theme, and colours that tell who set each value - by hand, the theme, a boot sequence or the music.
+- **Live control panel**: one settings panel, in tabs - Scene, Input, Backdrop, Wave, Post, Particles - with a slider or select per setting, named after the firmware's own parameters. Tooltips indicate what each setting does and where it comes from; a reset per row, a lock that keeps a value from the theme, and colours that tell who set each value - by hand, the theme, a boot sequence or the music.
 - **Reverse-engineered particle system**: `particles-reverse.js` is a JavaScript port of the SPU update task in the PS3's `particles.elf` and of the PPU side that feeds it - the emitter, the flow grid and the controller's response - drawn in the two passes the XMB uses, re-authored in GLSL. The firmware's own parameter sets come with it: the day cycle runs by the clock, and the controller stand-in (arrow keys, mouse drag) stirs the field the way the real one does. The mouse pointer, which the console doesn't have, pushes the sparkles it passes over the way a moving XMB icon does.
 - **Reverse engineering notes included**: [SPLINE_REVERSE_ENGINEER.md](SPLINE_REVERSE_ENGINEER.md), [WAVE_REVERSE_ENGINEER.md](WAVE_REVERSE_ENGINEER.md) (an index into [`docs/wave/`](docs/wave/)), [PARTICLES_REVERSE_ENGINEER.md](PARTICLES_REVERSE_ENGINEER.md) (an index into [`docs/particles/`](docs/particles/)) and [BACKGROUND_REVERSE_ENGINEER.md](BACKGROUND_REVERSE_ENGINEER.md) (an index into [`docs/background/`](docs/background/)) document traced functions, memory ranges, and what is still modelled, each one saying which is which.
 
@@ -97,15 +97,17 @@ npm run start
 
 Every setting's name has a tooltip that says what it does and where it comes from.
 
-1. **Spline Controls (top-right)**:
-   - Leave the gradient on `Auto (date and time)`, or pick a preset (`MM (Day)` / `MM (Night)`), or go back to `Original (RGB Sliders)`.
-   - Tweak the wave with `LINE1.mnu`'s own parameters - its springs, noise, placement, deformation and lighting - and the passes after it with `HDR.mnu`'s (exposure, tone curve, glare) and `BACKGROUND.mnu`'s colours.
+1. **The Settings panel (top-right)**:
+   - Its settings are laid out in tabs, and within each in titled sections. Most are the firmware's own parameters, under their own names.
+   - Each tab counts the values changed in it by hand, and the header counts them all, beside the ones the theme, a boot sequence or the music set, in their own colours. A value changed by hand can be locked against the theme, and `Reset` takes it back.
 
-2. **Particles Controls (top-left)**:
-   - `Theme` picks the parameter set the whole scene runs on: `Auto (time of day)` blends dawn, day, dusk and night with the clock, and the others hold one of the firmware's sets.
-   - `Sequence` plays one of the XMB's boot sequences over it: `XMB start`, `Game launch` or `Other launch`.
-   - Tweak the sparkles with `PARTICLES.mnu`'s own parameters - emission, life, wind and noise, lighting, size and focus, glare - and how the controller stirs them with `PARTICLES_UI.mnu`'s.
-   - Set the console's state the scene is drawn under: the video output, What's New's board, music playback, Theme Settings' Brightness and Colour, and the background given away to another module.
+2. **Its tabs**:
+   - `Scene`: `Theme` picks the parameter set the whole scene runs on - `Auto (time of day)` blends dawn, day, dusk and night with the clock, and the others hold one of the firmware's sets - and `Sequence` plays one of the XMB's boot sequences over it: `XMB start`, `Game launch` or `Other launch`. Then the console's state the scene is drawn under: music playback, Theme Settings' Brightness and Colour, the video output, and the background given away to another module.
+   - `Input`: what the arrow keys and the mouse do to the sparkles, and how the controller stirs them, with `PARTICLES_UI.mnu`'s parameters.
+   - `Backdrop`: `BACKGROUND.mnu`'s backdrop programs and its tint. The backdrop is always the console's own, by the date and the time of day.
+   - `Wave`: `LINE1.mnu`'s parameters - the lines' springs and noise, the wave's placement, its deformation and shading - and its tint.
+   - `Post`: `HDR.mnu`'s passes after the wave: the tone curve and the glare.
+   - `Particles`: `PARTICLES.mnu`'s parameters - emission, life, motion, lighting, size and focus, glare.
 
 3. **Interacting with the scene**:
 
@@ -118,11 +120,11 @@ Every setting's name has a tooltip that says what it does and where it comes fro
    | Dragging with the mouse | Tilts and shakes a virtual Sixaxis: shaking it stirs the sparkles up, as shaking the controller does on the console. |
 
 4. **UI visibility**:
-   - Each panel has a `Hide` button, which leaves a `Show ...` button in its place.
-   - `H` hides or shows every panel, and the notice at the bottom.
+   - The panel's `Hide` button leaves a `Show Settings` button in its place.
+   - `H` hides or shows the panel, and the notice at the bottom.
 
 5. **Page/URL parameters**:
-   - `?ui=off` at the end of the address starts the page without the panels and the notice, for the scene alone - in a frame or as a wallpaper: [faquino.github.io/PlayStation-3-XMB/?ui=off](https://faquino.github.io/PlayStation-3-XMB/?ui=off). `H` brings them back.
+   - `?ui=off` at the end of the address starts the page without the panel and the notice, for the scene alone - in a frame or as a wallpaper: [faquino.github.io/PlayStation-3-XMB/?ui=off](https://faquino.github.io/PlayStation-3-XMB/?ui=off). `H` brings them back.
 
 
 ## Technical Details (subject to change anytime)

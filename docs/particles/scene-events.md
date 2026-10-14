@@ -126,7 +126,8 @@ over 2 seconds from wherever it stands, and if the board had faded the theme and
 brings them back at once (`0x10980`).
 
 Which of the XMB's actions opens the board with which flags is not traced, and is not pursued: it
-is the XMB's doing, not the scene's, and the page sets the factor by hand (`whatsNewBoard`). On
+is the XMB's doing, not the scene's, and the page keeps the board closed (`whatsNewBoard`, off the
+panel, which the code still reads). On
 the console, focusing What's New hides the scene, which is what the first branch does. Other items
 hide it as they are focused too: Photo Gallery in the Photo column, PlayStation Store in the Game
 and PlayStation Network columns, and the sign-up in PlayStation Network's; on a real console, most

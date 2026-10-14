@@ -55,34 +55,37 @@
 
       const HIDE_TITLE = 'Hide this panel - Press H to toggle GUI visibility';
 
-      const splinePanel = window.createSettingsPanel({
-        id: 'spline-panel',
-        title: 'Spline Controls',
-        settings: window.SPLINE_SETTINGS,
-        meta: window.SPLINE_SETTINGS_META,
-        // What the theme and the sequences write into the wave: a value changed by hand there can be locked
-        // against them.
-        lockable: window.WAVE_THEME_KEYS,
+      // One panel for both settings objects, in tabs: the particles' object holds the scene's state, the input and
+      // PARTICLES.mnu, the wave's the backdrop, the wave and the passes after it. What the theme and the sequences
+      // write into either can, once changed by hand, be locked against them.
+      const settingsPanel = window.createSettingsPanel({
+        id: 'settings-panel',
+        title: 'Settings',
         position: { top: '12px', right: '12px' },
         showPosition: { top: '12px', right: '12px' },
         hideTitle: HIDE_TITLE,
-      });
-
-      const particlesPanel = window.createSettingsPanel({
-        id: 'particles-panel',
-        title: 'Particles Controls',
-        settings: window.PARTICLE_SETTINGS,
-        meta: window.PARTICLE_SETTINGS_META,
-        // What the theme and the sequences write: a value changed by hand there can be locked against them.
-        lockable: window.PARTICLE_THEME_KEYS,
-        position: { top: '12px', left: '12px' },
-        showPosition: { top: '12px', left: '12px' },
-        hideTitle: HIDE_TITLE,
+        tabs: ['Scene', 'Input', 'Backdrop', 'Wave', 'Post', 'Particles'],
+        sources: {
+          particles: {
+            settings: window.PARTICLE_SETTINGS,
+            meta: window.PARTICLE_SETTINGS_META,
+            layout: window.PARTICLE_SETTINGS_LAYOUT,
+            lockable: window.PARTICLE_THEME_KEYS,
+            defaultTab: 'Particles',
+          },
+          wave: {
+            settings: window.SPLINE_SETTINGS,
+            meta: window.SPLINE_SETTINGS_META,
+            layout: window.SPLINE_SETTINGS_LAYOUT,
+            lockable: window.WAVE_THEME_KEYS,
+            defaultTab: 'Wave',
+          },
+        },
       });
 
       // The controls and the notice can be put away, for the scene alone - in a frame or as a wallpaper: H toggles
       // them, unless it is typed into a control or comes with a modifier (Ctrl+H is the browser's), and ?ui=off starts
-      // the page without them. Each panel comes back as it was left, open or hidden behind its Show button.
+      // the page without them. The panel comes back as it was left, open or hidden behind its Show button.
       if (new URLSearchParams(window.location.search).get('ui') === 'off') document.body.classList.add('ui-off');
       window.addEventListener('keydown', function (e) {
         if (e.key !== 'h' && e.key !== 'H') return;
@@ -92,17 +95,17 @@
       });
 
       // The theme writes the firmware's own parameter sets into the particles' and the wave's settings; on 'auto' it
-      // keeps up with the clock. The particle panel holds the scene's state it follows, and it leaves alone what is
-      // locked from either panel.
+      // keeps up with the clock. The particles' settings hold the scene's state it follows, and it leaves alone what is
+      // locked in the panel.
       function syncThemes() {
         const scene = window.PARTICLE_SETTINGS;
         const writers = window.applySceneThemes(scene, {
-          particles: { settings: scene, keep: particlesPanel ? particlesPanel.locked : null },
-          wave: { settings: window.SPLINE_SETTINGS, keep: splinePanel ? splinePanel.locked : null },
+          particles: { settings: scene, keep: settingsPanel ? settingsPanel.locked.particles : null },
+          wave: { settings: window.SPLINE_SETTINGS, keep: settingsPanel ? settingsPanel.locked.wave : null },
         });
-        // It names who wrote - the theme, the music or a sequence - and each panel colours them apart.
-        if (writers.particles && particlesPanel) particlesPanel.refresh(writers.particles);
-        if (writers.wave && splinePanel) splinePanel.refresh(writers.wave);
+        // It names who wrote - the theme, the music or a sequence - and the panel colours them apart.
+        if (writers.particles && settingsPanel) settingsPanel.refresh('particles', writers.particles);
+        if (writers.wave && settingsPanel) settingsPanel.refresh('wave', writers.wave);
       }
 
       syncThemes();

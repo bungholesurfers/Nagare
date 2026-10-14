@@ -43,7 +43,9 @@ on each frame that passes its draw, simply keeps it that way.
   to what the simulation runs on and the shaders draw with. The video output's factor comes
   from `videoOutput`, 1080p by default as in every capture. The event factor runs the
   firmware's animation, towards 1 while `whatsNewBoard` is open and towards 0 while it is
-  closed, as events 11 would take it; closed is the default, as in every capture. Headless,
+  closed, as events 11 would take it; closed is the default, as in every capture, and the
+  setting stays off the panel, its question closed - see [What's New's
+  board](scene-events.md#whats-news-board). Headless,
   opening and closing the board, and reopening it halfway down, the factor stays within 1e-15
   of the firmware's curve, and each frame's parameters carry the factor of the frame before.
 - **The fade.** `scene-themes.js` sends the scene's fade (`xmbSceneFade`): `themeBrightness`
@@ -88,7 +90,7 @@ on each frame that passes its draw, simply keeps it that way.
   icon sits is the captures' - see [Where the icons are](flow-grid.md#where-the-icons-are). How they get
   there is the XMB's, not measured and not pursued:
   - on a step every icon eases towards its new place, and every category icon towards its new
-    height, with a time constant of `iconEaseSec`. At its 0.065 s, the first frame of a step
+    height, with a time constant of `iconEaseSec`, kept off the panel. At its 0.065 s, the first frame of a step
     writes 58 into the category row, the captures' strongest byte there being 59.
   - Only the selected category's column is drawn, and a newly selected one appears in place.
     The console also draws the columns it is leaving, moving sideways with the row, which

@@ -1,7 +1,8 @@
 'use strict';
 // Particle parameters: firmware defaults from PARTICLES.mnu and PARTICLES_UI.mnu, plus the console's state the
 // particles are drawn under and the knobs of the modelled PPU side. Consumed by `particles.js`, `particles-reverse.js`
-// and `xmb-input.js`; sliders from `settings-panels.js`, which shows each meta's `help` as its label's tooltip.
+// and `xmb-input.js`; sliders from `settings-panels.js`, in the tabs and sections `PARTICLE_SETTINGS_LAYOUT` lays out,
+// each meta's `help` as its label's tooltip and its `hidden`, the reason why, keeping it off the panel.
 // Reads `PARTICLE_THEME_OPTIONS` (`scene-themes.js`) at load time for the theme dropdown. The theme, the sequence,
 // the music and Theme Settings are the whole scene's state: `scene-themes.js` writes the wave's sets by them too.
 
@@ -490,6 +491,8 @@ window.PARTICLE_SETTINGS_META = {
       "Console state: PARTICLES_SPE.mnu's second factor",
   },
   whatsNewBoard: {
+    hidden: "Closed: which of the XMB's actions open the board is not pursued (docs/particles/scene-events.md), and " +
+      'focusing it hides the scene anyway; closed, as in every capture',
     type: 'select', options: [{ value: 'closed', label: 'Closed' }, { value: 'open', label: 'Open' }],
     help: "What's New's board: opening its list speeds the particles up, widens their glint and strengthens their " +
       'glare, over 2 s; closing it takes them back.\n' +
@@ -538,11 +541,14 @@ window.PARTICLE_SETTINGS_META = {
       "Page setting: the console's callers use 0 to 1000 ms",
   },
   flowStrength: {
+    hidden: 'A firmware constant, not a parameter: the PPU always writes 1',
     min: 0, max: 2, step: 0.0005,
     help: 'Strength of the flow grid, which carries the icon wind to the particles.\n' +
       'Firmware constant: the PPU always writes 1',
   },
   iconEaseSec: {
+    hidden: "Modelled and closed: how the XMB moves its icons is not pursued, and the page draws none " +
+      '(docs/particles/flow-grid.md)',
     min: 0.005, max: 1, step: 0.005,
     help: "Time constant of the modelled icons' easing after a step: the shorter, the faster they move, and faster " +
       'icons raise a stronger wind.\n' +
@@ -575,3 +581,30 @@ window.PARTICLE_SETTINGS_META = {
       'it off.\nPage setting: the console has no pointer',
   },
 };
+
+// Where the panel shows each setting: its tab and its section, in this order. A setting left out lands in an Other
+// section of the Particles tab; one whose meta says `hidden` stays off the panel.
+window.PARTICLE_SETTINGS_LAYOUT = [
+  { tab: 'Scene', section: 'Scene', keys: ['theme', 'sequence', 'musicPlayback'] },
+  { tab: 'Scene', section: 'Theme Settings', keys: ['themeBrightness', 'themeColor'] },
+  { tab: 'Scene', section: 'Display', keys: ['videoOutput', 'xmbBackground', 'backgroundFadeMs', 'whatsNewBoard'] },
+  { tab: 'Input', section: 'Arrow keys', keys: ['verticalSteps', 'dpadRotMax', 'dpadScaleX', 'dpadScaleY'] },
+  { tab: 'Input', section: 'Mouse', keys: ['pointerWind', 'mouseAccelToG', 'mouseYawGain'] },
+  { tab: 'Input', section: 'Motion and shakes', keys: ['uiBrownian', 'rshakeBrw', 'dshakeRotMax', 'dshakeRotImp',
+    'dshakeBrwImp', 'dshakeThresh', 'dshakeXCoeff', 'dshakeGCoeff'] },
+  { tab: 'Input', section: 'Icon wind', keys: ['iconWind', 'iconWindSclX', 'iconWindSclY', 'iconEaseSec',
+    'flowStrength'] },
+  { tab: 'Particles', section: 'Emission', keys: ['emitVelMin', 'emitVelMul', 'emitVelVar', 'emitConeAngle',
+    'emitNegProb', 'emitVelZscale', 'emitPerFrame', 'emitProb'] },
+  { tab: 'Particles', section: 'Life', keys: ['agingSpeed', 'agingVariance'] },
+  { tab: 'Particles', section: 'Motion', keys: ['friction', 'spinTimeScale', 'deltaTime', 'gravity', 'windDirX',
+    'windDirY', 'windDirZ', 'windScale', 'windScale10', 'brownianScale'] },
+  { tab: 'Particles', section: 'Lighting', keys: ['spotPosX', 'spotPosY', 'spotPosZ', 'spotAttnX', 'spotAttnY',
+    'spotAttnZ', 'specularPower', 'specularCoeff', 'lambertCoeff', 'exposure', 'fresnel', 'colorControl',
+    'iridescentExp', 'globalAlpha'] },
+  { tab: 'Particles', section: 'Size and focus', keys: ['sizeMiddle', 'sizeNear', 'sizeFar', 'nearFocus',
+    'nearFocusDist', 'nearFocusPow', 'nearDarkness', 'nearFuzziness', 'farFocus', 'farFocusDist', 'farFocusPow',
+    'farDarkness'] },
+  { tab: 'Particles', section: 'Alignment and glare', keys: ['nearAlign', 'sizeAlign', 'glare', 'glareScale',
+    'glareP1', 'glareP2'] },
+];

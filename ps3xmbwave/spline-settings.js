@@ -1,7 +1,8 @@
 'use strict';
 // The backdrop's and the wave's settings: LINE1.mnu's, HDR.mnu's and BACKGROUND.mnu's parameters under their own
 // names, with the firmware's values. Read by `spline.js`, `wave-reverse.js` and `postprocess.js`, written by
-// `scene-themes.js` as the scene's set moves, and shown by `settings-panels.js`; declarative only, no runtime logic.
+// `scene-themes.js` as the scene's set moves, and shown by `settings-panels.js` in the tabs and sections
+// `SPLINE_SETTINGS_LAYOUT` lays out; declarative only, no runtime logic.
 
 window.SPLINE_SETTINGS = {
   gradientPreset: 'auto',
@@ -93,29 +94,36 @@ window.SPLINE_SETTINGS_META = {
     help: "Colours of the backdrop: Auto draws the console's, from the months' textures, the date and the time of " +
       "day; a month draws that month's texture as one gradient, and the original preset uses the RGB sliders below.\n" +
       'Backdrop: BACKGROUND_REVERSE_ENGINEER.md',
+    hidden: "Only Auto is offered: the month gradients and the RGB preset are the approximations of before the " +
+      'backdrop was read (background-gradients-*.js, made with the dds/ tool), kept in the code',
   },
   colorR: {
+    hidden: "The RGB preset's, which the panel no longer offers - see gradientPreset",
     min: 0, max: 255, step: 1, decimals: 0,
     help: "Red of the backdrop's colour, 0 to 255, for the original (RGB sliders) preset only.\n" +
       'Backdrop, hand-tuned',
   },
   colorG: {
+    hidden: "The RGB preset's, which the panel no longer offers - see gradientPreset",
     min: 0, max: 255, step: 1, decimals: 0,
     help: "Green of the backdrop's colour, 0 to 255, for the original preset only.\n" +
       'Backdrop, hand-tuned',
   },
   colorB: {
+    hidden: "The RGB preset's, which the panel no longer offers - see gradientPreset",
     min: 0, max: 255, step: 1, decimals: 0,
     help: "Blue of the backdrop's colour, 0 to 255, for the original preset only.\n" +
       'Backdrop, hand-tuned',
   },
   gradientTopMul: {
+    hidden: "The RGB preset's, which the panel no longer offers - see gradientPreset",
     min: 0, max: 0.3, step: 0.005,
     help: "Brightness of the backdrop's top edge, as a multiple of its colour (blue gets a fifth more). Original " +
       'preset only.\n' +
       'Backdrop, hand-tuned',
   },
   gradientBotMul: {
+    hidden: "The RGB preset's, which the panel no longer offers - see gradientPreset",
     min: 0.2, max: 1.2, step: 0.005,
     help: "Brightness of the backdrop's bottom edge, as a multiple of its colour. Original preset only.\n" +
       'Backdrop, hand-tuned',
@@ -148,6 +156,7 @@ window.SPLINE_SETTINGS_META = {
       'LINE1.mnu: PERTURBATION',
   },
   endX: {
+    hidden: 'No effect: the step reads only END Y and END Z',
     min: 0, max: 6, step: 0.05,
     help: 'No effect: the step sets the anchored ends at x = 0 and reads only END Y and END Z.\n' +
       'LINE1.mnu: END X',
@@ -267,17 +276,20 @@ window.SPLINE_SETTINGS_META = {
       'LINE1.mnu: FRESNEL (lines1.vpo _Fresnel)',
   },
   falloff: {
+    hidden: 'No effect: only lines2.vpo declares _Falloff, and every set draws the wave with lines1',
     min: 0, max: 2, step: 0.01,
     help: "No effect: the renderer hands it to the vertex program's _Falloff, which only lines2.vpo declares, and " +
       'every set draws the wave with lines1 (SHADER 1).\n' +
       'LINE1.mnu: FALLOFF',
   },
   spacing: {
+    hidden: 'No visible effect in any set: THINNESS is 1 in every one, which turns the stripes off',
     min: 10, max: 800, step: 1, decimals: 0,
     help: 'How many stripes run along the wave, across its lines. They show only with Thinness below 1.\n' +
       'LINE1.mnu: SPACING (lines1.fpo _Spacing)',
   },
   thinness: {
+    hidden: 'The same in every set, 1, which turns the stripes off, and Spacing with them',
     min: 0, max: 1, step: 0.01,
     help: "How much of each stripe's period is dark. At 1, as in every set, there are no stripes and the wave is " +
       'lit evenly.\n' +
@@ -437,3 +449,25 @@ window.SPLINE_SETTINGS_META = {
       'BACKGROUND.mnu: COLOUR SHADER',
   },
 };
+
+// Where the panel shows each setting: its tab and its section, in this order. A setting left out lands in an Other
+// section of the Wave tab; one whose meta says `hidden` stays off the panel.
+window.SPLINE_SETTINGS_LAYOUT = [
+  { tab: 'Backdrop', section: 'Programs', keys: ['colourShader', 'nightBlend', 'night2dayBegin', 'night2dayEnd',
+    'day2nightBegin', 'day2nightEnd', 'dayspread', 'nightWhitBias'] },
+  { tab: 'Backdrop', section: 'Tint, top and bottom', keys: ['colour1Red', 'colour1Green', 'colour1Blue', 'colour2Red',
+    'colour2Green', 'colour2Blue'] },
+  { tab: 'Backdrop', section: 'Presets', keys: ['gradientPreset', 'colorR', 'colorG', 'colorB', 'gradientTopMul',
+    'gradientBotMul'] },
+  { tab: 'Wave', section: 'Lines', keys: ['damping', 'length', 'tension', 'timestep', 'perturbation', 'endX', 'endY',
+    'endZ'] },
+  { tab: 'Wave', section: 'Placement', keys: ['posX', 'posY', 'posZ', 'angX', 'angY', 'angZ', 'angRot'] },
+  { tab: 'Wave', section: 'Deformation', keys: ['ffdScale1X', 'ffdScale1Y', 'ffdScale1Z', 'ffdScale2X', 'ffdScale2Y',
+    'ffdScale2Z', 'ffdOffsetX', 'ffdOffsetY', 'ffdOffsetZ', 'ffdParam1'] },
+  { tab: 'Wave', section: 'Shading', keys: ['brightness', 'fresnel', 'mipmapBias', 'falloff', 'spacing', 'thinness'] },
+  { tab: 'Wave', section: 'Tint, left and right', keys: ['colour3Red', 'colour3Green', 'colour3Blue', 'colour4Red',
+    'colour4Green', 'colour4Blue'] },
+  { tab: 'Post', section: 'Tone curve', keys: ['exposure', 'whiteLevel', 'dither'] },
+  { tab: 'Post', section: 'Glare', keys: ['glareLevel', 'glareThresh', 'gaussianRadR', 'gaussianRadG', 'gaussianRadB',
+    'glareSumPow'] },
+];

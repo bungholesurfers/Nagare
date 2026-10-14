@@ -51,7 +51,7 @@ body.ui-off .disclaimer { display: none; }
 
 .settings-panel {
   position: fixed;
-  width: 320px;
+  width: 344px;
   max-height: calc(100vh - 24px);
   overflow: hidden;
   background: rgba(10, 14, 22, 0.78);
@@ -101,9 +101,61 @@ body.ui-off .disclaimer { display: none; }
 .settings-panel-count[hidden] { display: none; }
 
 .settings-panel-list {
-  max-height: calc(100vh - 70px);
+  max-height: calc(100vh - 104px);
   overflow: auto;
-  padding: 6px 8px 8px 4px;
+  padding: 2px 8px 8px 4px;
+}
+
+/* The tabs the settings are laid out in: the chosen one lit, each counting the rows changed in it from the panel. */
+.settings-tabs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 2px;
+  padding: 6px 8px 0;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.12);
+}
+
+.settings-tab {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 4px 7px 5px;
+  border: 1px solid transparent;
+  border-bottom: none;
+  border-radius: 5px 5px 0 0;
+  background: transparent;
+  color: #9fb0cc;
+  font: inherit;
+  font-size: 11px;
+  cursor: pointer;
+}
+
+.settings-tab:hover { color: #d5deee; background: rgba(255, 255, 255, 0.06); }
+
+.settings-tab[aria-selected="true"] {
+  color: #ffffff;
+  background: rgba(255, 255, 255, 0.1);
+  border-color: rgba(255, 255, 255, 0.18);
+}
+
+.settings-tab-count {
+  padding: 0 5px;
+  border-radius: 7px;
+  background: rgba(255, 194, 102, 0.16);
+  color: #ffc266;
+  font-size: 10px;
+}
+
+.settings-tab-count[hidden],
+.settings-tab-page[hidden] { display: none; }
+
+.settings-section-title {
+  margin: 10px 0 2px 5px;
+  color: #8fa0bd;
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.6px;
+  text-transform: uppercase;
 }
 
 .settings-row {
