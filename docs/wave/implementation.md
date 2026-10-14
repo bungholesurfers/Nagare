@@ -170,11 +170,11 @@ Known differences, all of them the start's:
 
 - **The band is about a tenth thinner, and at first nearer** - 0.3 nearer at the XMB's start and
   for some forty seconds after. The console's lines fan out in y in the minutes after the reset,
-  their spread across a column going from 0.19 to 0.37, along a slow mode its own start sets
-  going; the made start has the console's energy and stretch but not that mode's phase. Laying the
-  console's state's mean place and velocity line by line onto the made start brings the band's
-  height back, but strains the springs across the lines, and the wave then moves 15% too fast at
-  rest.
+  their spread across a column going from 0.19 to 0.37, and the made start's less and later. The
+  made start has the console's stretch but less than half its kinetic energy - a mean v² of 9.7
+  against 21.5, a median speed of 2.7 against 4.0 - which its first ten seconds of steps make up.
+  The fan-out is not pursued: it comes of the console's state as a whole, and no part of it short
+  of the whole brings it - see [Ruled out](history.md#ruled-out).
 - **Its far end reaches less far to the left on screen**, -2.30 at most against -3.21.
 - **Under the music it moves faster than the console's**, 0.0054 a frame against 0.0045. The page
   puts the music on as its start ends, where the console's had run its lines for minutes under the

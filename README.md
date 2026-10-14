@@ -36,7 +36,7 @@ While this is inspired by the official PlayStation 3 XMB background wave design,
 
 - There are no firmware assets or code in this repository, so the page generates approximate fits of the textures it needs: the backdrop's month textures, the sparkles' iridescent colours and the table used to light the wave's edges where it turns away from view (`_FresLUT`). The shader programs that draw the backdrop, on the other hand, have been rewritten faithfully, checked against the console's to float precision: the default one (which runs over those month fits) and the one used while music plays (which needs no texture at all).
 - Sparkles run the console's own update task, fed by the PPU side as traced - the emitter, the flow grid's rule, the controller - and a headless bench (`tools/bench/particles.js`) compares their pool with one read out of a savestate and what they draw with two frame captures, each at its own moment. What is left is the XMB's side: how its icons move, which writes the flow grid, and when it sends a step.
-- The wave's geometry is the console's own now, checked piece by piece against savestates, and so are the passes the console runs after it - the composite with the backdrop, the tone curve and the glare: fed the console's own mesh, the page draws RPCS3's screenshot of the moment. What is left is the very first minutes after a start: the console starts its lines from a state baked into its firmware, so the page makes one the same way, which keeps the console's pace but not its exact course.
+- The wave's geometry is the console's own now, checked piece by piece against savestates, and so are the passes the console runs after it - the composite with the backdrop, the tone curve and the glare: fed the console's own mesh, the page draws RPCS3's screenshot of the moment. What differs is the very first minutes after a start: the console starts its lines from a state baked into its firmware, so the page makes one the same way, which keeps the console's pace but not its exact course.
 - The glare follows RPCS3, which runs the CLAMP its textures are set to as clamp-to-edge. On a real RSX, CLAMP may instead blend the edge with a border colour, as the GPUs it descends from did, which would dim the glare along the screen's edges; only real hardware can tell.
 
 
@@ -125,7 +125,7 @@ Every setting's name has a tooltip that says what it does and where it comes fro
 
 ### Reverse-Engineered Wave Status
 - **What is implemented**: the lines' simulation, the deformation lattice, the free-form deformation, the camera and the B-spline surface, with the line programs' shading, the passes that follow the wave, and the firmware's `LINE1.mnu`, `HDR.mnu` and `BACKGROUND.mnu` sets - see [WAVE_REVERSE_ENGINEER.md](WAVE_REVERSE_ENGINEER.md) and [BACKGROUND_REVERSE_ENGINEER.md](BACKGROUND_REVERSE_ENGINEER.md).
-- **What is still missing**: the very first minutes after a start, and what keeps a run from the reset from landing exactly on a savestate.
+- **What is still missing**: what keeps a run from the reset from landing exactly on a savestate. The very first minutes after a start stay as the page makes them: matching the console's would take its baked start itself.
 
 
 ## License and Disclaimer
@@ -152,8 +152,7 @@ Found a bug or something that looks different from the console? [Open an issue o
 
 ## TODO
 
-- Bring the wave's first minutes after a start closer to the console's: its lines start from a state baked into the firmware, which the page has to make its own way - see [WAVE_REVERSE_ENGINEER.md](WAVE_REVERSE_ENGINEER.md#still-missing).
-- Find what keeps a run of the lines from the reset from landing exactly on a savestate.
+- Find what keeps a run of the lines from the reset from landing exactly on a savestate - see [WAVE_REVERSE_ENGINEER.md](WAVE_REVERSE_ENGINEER.md#still-missing).
 - Trace the XMB's side of the sparkles: how it moves its icons and when it repeats a held direction, which the page models - see [PARTICLES_REVERSE_ENGINEER.md](PARTICLES_REVERSE_ENGINEER.md#still-missing).
 - Find where `_Gamma` comes from, what starts `anim_coldboot` and who sends the scene its events 2 and 3.
 - Catch the backdrop's ease in a frame capture, to confirm the copy it starts from - see [BACKGROUND_REVERSE_ENGINEER.md](BACKGROUND_REVERSE_ENGINEER.md#still-missing).

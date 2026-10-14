@@ -6,6 +6,18 @@ may already be ruled out.
 
 ## Ruled out
 
+- **Carrying part of the console's start onto the made one.** The console's lines fan out after
+  the reset however its state is nudged - noise of 0.03 on the places or 0.3 on the velocities
+  leaves the spread's rise to some 0.4 by 75 seconds - but only from the state as a whole. Its
+  smoothest components, cosines across the lines and along them, laid onto the made start, do not
+  bring the fan-out, from 36 numbers to 270, and throw the lines' speed off; the console's state
+  with its smoothest 36 swapped for the made start's loses it. Its places alone or its velocities
+  alone do not bring it either, nor the made start's velocities scaled towards the console's
+  kinetic energy, nor its mean place and velocity line by line, which bring the band's height back
+  but strain the springs across the lines, the wave then moving 15% too fast at rest. Most of the
+  velocities' difference is fine detail: 270 cosines hold a fifth of it. Bringing the fan-out would
+  take the console's state itself, firmware data, so the start is left as made - see [Against the
+  console](implementation.md#against-the-console).
 - **The glare's textures fading to a black border.** Their CLAMP was read as the RSX's, which,
   as the GPUs it descends from did, would blend a texture's edge with its border colour, black.
   RPCS3 runs it as clamp-to-edge, and its screenshots under the music, bright up to the top right

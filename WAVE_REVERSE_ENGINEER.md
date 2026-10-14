@@ -51,11 +51,6 @@ What `ps3xmbwave/` ports as verified and what it models, file by file;
 The implementation models all of these. They are listed roughly by how much each one changes the
 wave on screen:
 
-- **The lines' start.** The console's, baked into its module, is firmware data, and from it the
-  page draws the console's wave frame by frame - see [Against the
-  console](docs/wave/implementation.md#against-the-console). The start the page makes has its
-  energy and stretch, and the wave's pace and depth at rest match; for the first minutes after
-  the reset its band is about a tenth thinner, and at first nearer.
 - **A run from the reset.** What, beyond the cold boot's ramp of `PERTURBATION`, keeps a run from
   the reset from landing on a savestate - see [From the start](docs/wave/lines.md#from-the-start).
 
