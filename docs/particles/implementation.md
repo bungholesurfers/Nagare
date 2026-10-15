@@ -59,7 +59,8 @@ on each frame that passes its draw, simply keeps it that way.
   and the wave dim with it, to black when hidden. At -3 the capture of 11:38 on 3 October reads
   `_Color` (0.55, 0.55, 0.55, 0), as the page does.
 - **Boot sequences.** `sequence` plays the XMB's start, a game's launch or another content's,
-  on the particles and the wave, as [What puts each set in](parameter-sets.md#what-puts-each-set-in)
+  on the particles and the wave - the page opens with the XMB's start, as the console does - as
+  [What puts each set in](parameter-sets.md#what-puts-each-set-in)
   reads them: each step blends from wherever the parameters stand, the cold boot's first 4
   seconds by mode 1's 1% a frame, which leaves the particles where `coldboot1` put them, and the
   start hands over to the theme on the clock's first tick after `ShowGUI`, which puts the cycle's

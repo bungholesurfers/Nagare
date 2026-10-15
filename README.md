@@ -102,7 +102,7 @@ Every setting's name has a tooltip that says what it does and where it comes fro
    - Each tab counts the values changed in it by hand, and the header counts them all, beside the ones the theme, a boot sequence or the music set, in their own colours. A value changed by hand can be locked against the theme, and `Reset` takes it back.
 
 2. **Its tabs**:
-   - `Scene`: `Theme` picks the parameter set the whole scene runs on - `Auto (time of day)` blends dawn, day, dusk and night with the clock, and the others hold one of the firmware's sets - and `Sequence` plays one of the XMB's boot sequences over it: `XMB start`, `Game launch` or `Other launch`. Then the console's state the scene is drawn under: music playback, Theme Settings' Brightness and Colour, the video output, and the background given away to another module.
+   - `Scene`: `Theme` picks the parameter set the whole scene runs on - `Auto (time of day)` blends dawn, day, dusk and night with the clock, and the others hold one of the firmware's sets - and `Sequence` plays one of the XMB's boot sequences over it: `XMB start`, `Game launch` or `Other launch`. The page opens with `XMB start`, as the console does. Then the console's state the scene is drawn under: music playback, Theme Settings' Brightness and Colour, the video output, and the background given away to another module.
    - `Input`: what the arrow keys and the mouse do to the sparkles, and how the controller stirs them, with `PARTICLES_UI.mnu`'s parameters.
    - `Backdrop`: `BACKGROUND.mnu`'s backdrop programs and its tint. The backdrop is always the console's own, by the date and the time of day.
    - `Wave`: `LINE1.mnu`'s parameters - the lines' springs and noise, the wave's placement, its deformation and shading - and its tint.

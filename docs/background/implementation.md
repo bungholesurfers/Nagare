@@ -46,7 +46,8 @@ they are, and the passes after the wave go over them all the same.
   `textures/month_bg`. They leave 0.4 to 3.2 levels of 255 (rms) of the textures, and the backdrop
   drawn from them is 0.3 to 1.5 levels (rms) from the one drawn from the textures, 11 at most.
 - **The page's first frame.** The console's backdrop starts at midnight in January, with the
-  months' program, and eases into what it is first handed; the page's first frame takes the moment
-  and the program as they are, as if the XMB had been running.
+  months' program, and eases into what it is first handed: the XMB's start's 10:00, over 7.5
+  seconds. The page, which opens with that start too, eases into it from an empty buffer, black,
+  and takes the program as it is.
 - **The ticks' phase.** The scene's clock ticks on the page's whole seconds; the console's counts
   from its own start-up.

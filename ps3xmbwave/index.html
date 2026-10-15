@@ -94,6 +94,10 @@
         document.body.classList.toggle('ui-off');
       });
 
+      // The page opens as the console does, with the XMB's start. It is set after the panel is made, so the setting's
+      // default stays None: the first sync plays it, and the panel marks it as the sequence's until it hands over.
+      window.PARTICLE_SETTINGS.sequence = 'coldboot';
+
       // The theme writes the firmware's own parameter sets into the particles' and the wave's settings; on 'auto' it
       // keeps up with the clock. The particles' settings hold the scene's state it follows, and it leaves alone what is
       // locked in the panel.

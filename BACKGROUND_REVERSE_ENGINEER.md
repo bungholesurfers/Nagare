@@ -41,7 +41,7 @@ What `ps3xmbwave/` ports as verified and what it models, file by file;
 
 | File | Verified | Modelled |
 |---|---|---|
-| `backdrop.js` | `back_colours0` and `back_colours1`, re-authored, to float precision; their uniforms from the time of day, the date and `BACKGROUND.mnu`, as `0x52ad8` works them out, against every capture and savestate; the ease from a copy of the backdrop, as `0x52ef0` runs it; with the passes after the wave, RPCS3's screenshots to a level or two, and under the music to three. | The page's first frame, taken as it is. |
+| `backdrop.js` | `back_colours0` and `back_colours1`, re-authored, to float precision; their uniforms from the time of day, the date and `BACKGROUND.mnu`, as `0x52ad8` works them out, against every capture and savestate; the ease from a copy of the backdrop, as `0x52ef0` runs it; with the passes after the wave, RPCS3's screenshots to a level or two, and under the music to three. | The page's first frame, eased into from black rather than from midnight in January. |
 | `background-months.js` | | The 24 month textures as cubic fits, from 0.4 to 3.2 levels of 255 off them (rms). |
 | `scene-themes.js` | `BACKGROUND.mnu`'s parameters in each set, the code's defaults where a set leaves them out, `DAYSPREAD` held to its range, `COLOUR SHADER` put in at once - the music's way in and out included; the moments the backdrop is handed - the clock's ticks, what holds them, the XMB's start's 10:00 over 7.5 seconds. | The ticks on the page's whole seconds. |
 | `background-gradients-day.js`, `-night.js` | | The presets other than `auto`: each month as one linear gradient fitted to its texture by the `dds/` tool, drawn as it is. |

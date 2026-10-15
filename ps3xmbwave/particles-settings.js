@@ -128,7 +128,7 @@ window.PARTICLE_SETTINGS_META = {
       { value: 'gameboot', label: 'Game launch' }, { value: 'otherboot', label: 'Other launch' },
     ],
     help: "Plays one of the XMB's boot sequences over the theme: its start, a game's launch or another content's. It " +
-      "goes back to None when it is over. The XMB's start begins the wave's lines afresh.\n" +
+      "goes back to None when it is over. The XMB's start begins the wave's lines afresh, and the page opens with it.\n" +
       "The scene's own .rco animations, played by scene-themes.js",
   },
 
