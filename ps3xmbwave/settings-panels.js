@@ -1,10 +1,10 @@
 'use strict';
 // The settings panel: one panel whose tabs and sections each settings file's `*_SETTINGS_LAYOUT` lays out, built by
-// introspecting the settings objects into sliders, selects and Reset buttons - each label carrying its meta's `help`
-// as a tooltip, and a meta's `hidden`, the reason why, keeping a setting off it - which marks what was changed from
-// the panel, lets it be locked, and marks what something else set off its default. Fed by `spline-settings.js` and
-// `particles-settings.js`, created from `index.html`, which calls the returned `refresh()` when a theme or a sequence
-// rewrites the settings and hands them the `locked` ones.
+// introspecting the settings objects into sliders, selects - a radio pair for the two-valued ones - and Reset buttons,
+// each label carrying its meta's `help` as a tooltip, and a meta's `hidden`, the reason why, keeping a setting off it -
+// which marks what was changed from the panel, lets it be locked, and marks what something else set off its default.
+// Fed by `spline-settings.js` and `particles-settings.js`, created from `index.html`, which calls the returned
+// `refresh()` when a theme or a sequence rewrites the settings and hands them the `locked` ones.
 
 (function () {
   // The padlock beside a value changed by hand: open, the theme and the sequences may still move it; closed, they
@@ -30,6 +30,15 @@
 
   function humanizeKey(key) {
     return key.replace(/([A-Z])/g, ' $1').replace(/^./, function (c) { return c.toUpperCase(); });
+  }
+
+  // A select's options as { value, label }, each value of the type its meta gives it.
+  function choices(meta) {
+    return (Array.isArray(meta.options) ? meta.options : []).map(function (o) {
+      return o && typeof o === 'object'
+        ? { value: o.value, label: String(o.label != null ? o.label : o.value) }
+        : { value: o, label: String(o) };
+    });
   }
 
   function inferMeta(value) {
@@ -219,7 +228,7 @@
 
     // One settings object: its rows, wherever its layout puts them, and its own record of what was changed here and
     // what something else wrote.
-    function bindSource(sourceOptions) {
+    function bindSource(sourceOptions, sourceName) {
       const settings = sourceOptions.settings;
       const metaMap = sourceOptions.meta || {};
       const layout = sourceOptions.layout || [];
@@ -268,6 +277,8 @@
         const isSelect = meta.type === 'select';
         const isNumber = typeof value === 'number' && Number.isFinite(value);
         if (!isSelect && !isNumber) return;
+        const opts = isSelect ? choices(meta) : [];
+        const isPair = opts.length === 2; // two values: a pair of radio buttons, one click to change
 
         const row = document.createElement('div');
         row.className = 'settings-row';
@@ -301,10 +312,11 @@
 
         let sync; // brings the control up to the setting
         let describe; // a value as the control would show it, for the tooltips
-        let valueView; // what shows the value, and carries its tooltip: the number beside a slider, or the select
+        let valueView; // what shows the value, and carries its tooltip: the number beside a slider, the select, the pair
 
-        // A select writes strings, whatever type the setting started as. Numbers are the same within a billionth: the
-        // end of a theme's blend, a + (b - a) x 1, can land a hair off b.
+        // A select writes strings, and a radio pair its option's own value, whatever type the setting started as, so
+        // both compare as text. Numbers are the same within a billionth: the end of a theme's blend, a + (b - a) x 1,
+        // can land a hair off b.
         function same(a, b) {
           if (isSelect) return String(a) === String(b);
           return Math.abs(a - b) <= 1e-9 * Math.max(Math.abs(a), Math.abs(b));
@@ -352,19 +364,53 @@
           showCounts();
         }
 
-        if (isSelect) {
+        if (isPair) {
+          const group = document.createElement('div');
+          group.className = 'settings-radios';
+          group.setAttribute('role', 'radiogroup');
+          group.setAttribute('aria-label', humanizeKey(key));
+          const radios = opts.map(function (choice) {
+            const item = document.createElement('label');
+            item.className = 'settings-radio';
+            const input = document.createElement('input');
+            input.type = 'radio';
+            input.name = id + '-' + sourceName + '-' + key;
+            input.value = String(choice.value);
+            input.addEventListener('change', function () {
+              if (!input.checked) return;
+              settings[key] = choice.value;
+              written();
+            });
+            item.appendChild(input);
+            item.appendChild(document.createTextNode(choice.label));
+            group.appendChild(item);
+            return input;
+          });
+
+          sync = function () {
+            radios.forEach(function (input) { input.checked = input.value === String(settings[key]); });
+          };
+          sync();
+
+          resetBtn.addEventListener('click', function () {
+            settings[key] = initial[key];
+            sync();
+            written();
+          });
+
+          valueView = group;
+          describe = function (v) {
+            const choice = opts.find(function (c) { return String(c.value) === String(v); });
+            return choice ? choice.label : String(v);
+          };
+          controls.appendChild(group);
+        } else if (isSelect) {
           const select = document.createElement('select');
           select.className = 'settings-select';
-          const opts = Array.isArray(meta.options) ? meta.options : [];
-          opts.forEach(function (optDef) {
+          opts.forEach(function (choice) {
             const opt = document.createElement('option');
-            if (optDef && typeof optDef === 'object') {
-              opt.value = String(optDef.value);
-              opt.textContent = String(optDef.label != null ? optDef.label : optDef.value);
-            } else {
-              opt.value = String(optDef);
-              opt.textContent = String(optDef);
-            }
+            opt.value = String(choice.value);
+            opt.textContent = choice.label;
             select.appendChild(opt);
           });
           select.value = String(value);
@@ -477,7 +523,7 @@
     Object.keys(sources).forEach(function (name) {
       const src = sources[name];
       if (!src || !src.settings || typeof src.settings !== 'object') return;
-      bindings[name] = bindSource(src);
+      bindings[name] = bindSource(src, name);
       locked[name] = bindings[name].locked;
     });
 

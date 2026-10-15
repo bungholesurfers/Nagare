@@ -443,7 +443,7 @@ window.SPLINE_SETTINGS_META = {
       'BACKGROUND.mnu: NIGHT WHIT BIAS (back_colours0.fpo _NightBrightness)',
   },
   colourShader: {
-    min: 0, max: 1, step: 1, decimals: 0,
+    type: 'select', options: [{ value: 0, label: "0 - Months'" }, { value: 1, label: '1 - No textures' }],
     help: "Which program draws the backdrop: 0 the months' (back_colours0), 1 the one without them (back_colours1), " +
       'which the music and the welcome screens use. A change eases in over 2 seconds.\n' +
       'BACKGROUND.mnu: COLOUR SHADER',

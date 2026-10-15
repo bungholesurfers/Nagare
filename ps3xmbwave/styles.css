@@ -254,6 +254,31 @@ body.ui-off .disclaimer { display: none; }
   color: #f0f4ff;
 }
 
+/* A setting with two values, as a pair of radio buttons: one click to change it. */
+.settings-radios {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 2px 12px;
+  font-size: 11px;
+}
+
+.settings-radio {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  cursor: pointer;
+}
+
+.settings-radio input {
+  margin: 0;
+  accent-color: #74a1ff;
+  cursor: pointer;
+}
+
+.settings-row-modified .settings-radio input { accent-color: #ffc266; }
+
+.settings-row-external .settings-radio { color: var(--mark); }
+
 .settings-btn {
   background: rgba(255, 255, 255, 0.12);
   color: #ecf2ff;
