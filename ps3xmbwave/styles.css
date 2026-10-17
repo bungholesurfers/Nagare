@@ -279,6 +279,80 @@ body.ui-off .disclaimer { display: none; }
 
 .settings-row-external .settings-radio { color: var(--mark); }
 
+/* A palette: its preview, then a strip of swatches, each opening the browser's colour picker; + and - under Reset. */
+.settings-palette {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  flex: 1;
+  min-width: 0;
+}
+
+.settings-palette-preview {
+  flex: none;
+  width: 64px;
+  height: 64px;
+}
+
+.settings-swatches {
+  display: flex;
+  flex-wrap: wrap;
+  align-content: flex-start;
+  gap: 3px;
+  flex: 1;
+  min-width: 0;
+}
+
+.settings-swatch {
+  width: 18px;
+  height: 18px;
+  padding: 0;
+  border: 1px solid rgba(255, 255, 255, 0.25);
+  border-radius: 3px;
+  background: none;
+  cursor: pointer;
+}
+
+.settings-swatch::-webkit-color-swatch-wrapper { padding: 0; }
+
+.settings-swatch::-webkit-color-swatch {
+  border: none;
+  border-radius: 2px;
+}
+
+.settings-swatch::-moz-color-swatch {
+  border: none;
+  border-radius: 2px;
+}
+
+.settings-row-modified .settings-swatch { border-color: rgba(255, 194, 102, 0.7); }
+
+/* A control's own buttons under Reset, the row's actions held at its top, level with the control, so that they keep
+   their place however tall it grows. */
+.settings-actions-stacked {
+  flex-direction: column;
+  align-items: flex-end;
+  align-self: start;
+  /* The label's height above the control, set by hand: .settings-label's 11px at the panel's line-height of 1.3, about
+     14.3px, plus its 3px margin-bottom. Change either and this has to follow, or Reset drifts off the control's top. */
+  margin-top: 17px;
+}
+
+.settings-palette-steps {
+  display: flex;
+  gap: 4px;
+}
+
+.settings-palette-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 18px;
+  height: 18px;
+  padding: 0;
+  line-height: 1;
+}
+
 .settings-btn {
   background: rgba(255, 255, 255, 0.12);
   color: #ecf2ff;

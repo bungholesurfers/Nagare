@@ -1,10 +1,11 @@
 'use strict';
 // The settings panel: one panel whose tabs and sections each settings file's `*_SETTINGS_LAYOUT` lays out, built by
-// introspecting the settings objects into sliders, selects - a radio pair for the two-valued ones - and Reset buttons,
-// each label carrying its meta's `help` as a tooltip, and a meta's `hidden`, the reason why, keeping a setting off it -
-// which marks what was changed from the panel, lets it be locked, and marks what something else set off its default.
-// Fed by `spline-settings.js` and `particles-settings.js`, created from `index.html`, which calls the returned
-// `refresh()` when a theme or a sequence rewrites the settings and hands them the `locked` ones.
+// introspecting the settings objects into sliders, selects - a radio pair for the two-valued ones - palettes' swatches
+// and Reset buttons, each label carrying its meta's `help` as a tooltip, and a meta's `hidden`, the reason why, keeping
+// a setting off it - which marks what was changed from the panel, lets it be locked, and marks what something else set
+// off its default. Fed by `spline-settings.js` and `particles-settings.js`, created from `index.html`, which hands it
+// the palette's preview (`particles.js`) and calls the returned `refresh()` when a theme or a sequence rewrites the
+// settings and hands them the `locked` ones.
 
 (function () {
   // The padlock beside a value changed by hand: open, the theme and the sequences may still move it; closed, they
@@ -41,6 +42,29 @@
     });
   }
 
+  // A palette's 0xRRGGBB colour as a colour input holds it, and back.
+  function hexColour(colour) {
+    return '#' + (colour & 0xffffff).toString(16).padStart(6, '0');
+  }
+
+  function parseColour(hex) {
+    return parseInt(hex.slice(1), 16);
+  }
+
+  // Where a periodic Catmull-Rom loop through the palette passes halfway from its last colour back to its first, the
+  // colour + adds there: (-p0 + 9 p1 + 9 p2 - p3) / 16, channel by channel.
+  function seamColour(palette) {
+    const n = palette.length;
+    const p = [palette[(2 * n - 2) % n], palette[n - 1], palette[0], palette[1 % n]];
+    let colour = 0;
+    for (let shift = 16; shift >= 0; shift -= 8) {
+      const c = p.map(function (v) { return (v >> shift) & 255; });
+      const v = Math.round((-c[0] + 9 * c[1] + 9 * c[2] - c[3]) / 16);
+      colour |= Math.max(0, Math.min(255, v)) << shift;
+    }
+    return colour;
+  }
+
   function inferMeta(value) {
     const abs = Math.max(Math.abs(value), 1);
     return { min: value - abs * 2, max: value + abs * 2, step: abs / 200 };
@@ -74,8 +98,10 @@
   }
 
   // options: id, title, position and showPosition, hideTitle (the Hide button's tooltip), tabs (their names, in
-  // order), and sources, by name: { settings, meta, layout, lockable, defaultTab } for each settings object. A layout
-  // lists { tab, section, keys }; a key it leaves out lands in an Other section of its source's defaultTab.
+  // order), and sources, by name: { settings, meta, layout, lockable, defaultTab, previews } for each settings object.
+  // A layout lists { tab, section, keys }; a key it leaves out lands in an Other section of its source's defaultTab.
+  // previews, by key, draw a palette beside its swatches: a function of its value that returns { width, height, data },
+  // data a Uint8ClampedArray of RGBA, as ImageData holds it.
   window.createSettingsPanel = function createSettingsPanel(options) {
     const id = options && options.id;
     const title = options && options.title;
@@ -276,7 +302,8 @@
         if (meta.hidden) return; // kept in the settings, off the panel, for the reason it gives
         const isSelect = meta.type === 'select';
         const isNumber = typeof value === 'number' && Number.isFinite(value);
-        if (!isSelect && !isNumber) return;
+        const isPalette = meta.type === 'palette' && Array.isArray(value);
+        if (!isSelect && !isNumber && !isPalette) return;
         const opts = isSelect ? choices(meta) : [];
         const isPair = opts.length === 2; // two values: a pair of radio buttons, one click to change
 
@@ -312,13 +339,15 @@
 
         let sync; // brings the control up to the setting
         let describe; // a value as the control would show it, for the tooltips
-        let valueView; // what shows the value, and carries its tooltip: the number beside a slider, the select, the pair
+        // what shows the value, and carries its tooltip: the number beside a slider, the select, the pair, the palette
+        let valueView;
+        let belowReset = null; // the control's own buttons, if any, which go under Reset
 
         // A select writes strings, and a radio pair its option's own value, whatever type the setting started as, so
-        // both compare as text. Numbers are the same within a billionth: the end of a theme's blend, a + (b - a) x 1,
-        // can land a hair off b.
+        // both compare as text; so does a palette, its colours in order. Numbers are the same within a billionth: the
+        // end of a theme's blend, a + (b - a) x 1, can land a hair off b.
         function same(a, b) {
-          if (isSelect) return String(a) === String(b);
+          if (isSelect || isPalette) return String(a) === String(b);
           return Math.abs(a - b) <= 1e-9 * Math.max(Math.abs(a), Math.abs(b));
         }
 
@@ -433,6 +462,121 @@
             return opt ? opt.textContent : String(v);
           };
           controls.appendChild(select);
+        } else if (isPalette) {
+          // A strip of swatches, one per colour, each opening the browser's colour picker, and beside it the preview the
+          // source hands for it, if any; + and - go under Reset, where they keep their place however many colours there
+          // are. Every write is a new array: the snapshots above are shallow copies, which share the one they hold, so
+          // it is never changed in place.
+          const fewest = Number.isFinite(meta.min) ? meta.min : 1;
+          const most = Number.isFinite(meta.max) ? meta.max : Infinity;
+          const preview = sourceOptions.previews && sourceOptions.previews[key];
+
+          const box = document.createElement('div');
+          box.className = 'settings-palette';
+          let canvas = null;
+          if (preview) {
+            canvas = document.createElement('canvas');
+            canvas.className = 'settings-palette-preview';
+            box.appendChild(canvas);
+          }
+
+          const strip = document.createElement('div');
+          strip.className = 'settings-swatches';
+          strip.setAttribute('role', 'group');
+          strip.setAttribute('aria-label', humanizeKey(key));
+
+          const steps = document.createElement('div');
+          steps.className = 'settings-palette-steps';
+          function stepButton(text, help) {
+            const btn = document.createElement('button');
+            btn.className = 'settings-btn settings-palette-btn';
+            btn.type = 'button';
+            btn.textContent = text;
+            btn.title = help;
+            btn.setAttribute('aria-label', help);
+            steps.appendChild(btn);
+            return btn;
+          }
+          const addBtn = stepButton('+', 'Add a colour between the last and the first');
+          const removeBtn = stepButton('\u2212', 'Take the last colour away');
+          belowReset = steps;
+
+          function paint() {
+            const palette = settings[key];
+            if (!canvas || !Array.isArray(palette) || !palette.length) return;
+            const image = preview(palette);
+            if (canvas.width !== image.width) canvas.width = image.width;
+            if (canvas.height !== image.height) canvas.height = image.height;
+            canvas.getContext('2d').putImageData(new ImageData(image.data, image.width, image.height), 0, 0);
+          }
+
+          const swatches = [];
+          function swatch(index) {
+            const input = document.createElement('input');
+            input.type = 'color';
+            input.className = 'settings-swatch';
+            input.addEventListener('input', function () {
+              const next = settings[key].slice();
+              next[index] = parseColour(input.value);
+              settings[key] = next;
+              input.title = 'Colour ' + (index + 1) + ' of ' + next.length + ': ' + input.value;
+              paint();
+              written();
+            });
+            return input;
+          }
+
+          // As many swatches as colours, each showing its own; the picker a swatch has open is left alone.
+          function fill() {
+            const palette = settings[key];
+            while (swatches.length > palette.length) swatches.pop().remove();
+            while (swatches.length < palette.length) {
+              const input = swatch(swatches.length);
+              strip.appendChild(input);
+              swatches.push(input);
+            }
+            palette.forEach(function (colour, i) {
+              const hex = hexColour(colour);
+              if (swatches[i].value !== hex) swatches[i].value = hex;
+              swatches[i].title = 'Colour ' + (i + 1) + ' of ' + palette.length + ': ' + hex;
+            });
+            addBtn.disabled = palette.length >= most;
+            removeBtn.disabled = palette.length <= fewest;
+          }
+
+          sync = function () {
+            if (!Array.isArray(settings[key])) return;
+            fill();
+            paint();
+          };
+          sync();
+
+          addBtn.addEventListener('click', function () {
+            if (settings[key].length >= most) return;
+            settings[key] = settings[key].concat([seamColour(settings[key])]);
+            sync();
+            written();
+          });
+
+          removeBtn.addEventListener('click', function () {
+            if (settings[key].length <= fewest) return;
+            settings[key] = settings[key].slice(0, -1);
+            sync();
+            written();
+          });
+
+          resetBtn.addEventListener('click', function () {
+            settings[key] = initial[key];
+            sync();
+            written();
+          });
+
+          valueView = box;
+          describe = function (v) {
+            return Array.isArray(v) ? v.length + ' colours: ' + v.map(hexColour).join(' ') : String(v);
+          };
+          box.appendChild(strip);
+          controls.appendChild(box);
         } else {
           const numMeta = metaMap[key] || inferMeta(value);
           const decimals = Number.isFinite(numMeta.decimals) ? numMeta.decimals : decimalsFromStep(numMeta.step);
@@ -483,6 +627,10 @@
         actions.className = 'settings-actions';
         if (lockBtn) actions.appendChild(lockBtn);
         actions.appendChild(resetBtn);
+        if (belowReset) {
+          actions.classList.add('settings-actions-stacked');
+          actions.appendChild(belowReset);
+        }
 
         row.appendChild(left);
         row.appendChild(actions);

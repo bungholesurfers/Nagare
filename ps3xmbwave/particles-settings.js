@@ -1,8 +1,9 @@
 'use strict';
-// Particle parameters: firmware defaults from PARTICLES.mnu and PARTICLES_UI.mnu, plus the console's state the
-// particles are drawn under and the knobs of the modelled PPU side. Consumed by `particles.js`, `particles-reverse.js`
-// and `xmb-input.js`; sliders from `settings-panels.js`, in the tabs and sections `PARTICLE_SETTINGS_LAYOUT` lays out,
-// each meta's `help` as its label's tooltip and its `hidden`, the reason why, keeping it off the panel.
+// Particle parameters: firmware defaults from PARTICLES.mnu and PARTICLES_UI.mnu, the iridescent texture's palette,
+// fitted, plus the console's state the particles are drawn under and the knobs of the modelled PPU side. Consumed by
+// `particles.js`, `particles-reverse.js` and `xmb-input.js`; sliders, selects and the palette's editor from
+// `settings-panels.js`, in the tabs and sections `PARTICLE_SETTINGS_LAYOUT` lays out, each meta's `help` as its
+// label's tooltip and its `hidden`, the reason why, keeping it off the panel.
 // Reads `PARTICLE_THEME_OPTIONS` (`scene-themes.js`) at load time for the theme dropdown. The theme, the sequence,
 // the music and Theme Settings are the whole scene's state: `scene-themes.js` writes the wave's sets by them too.
 
@@ -83,6 +84,14 @@ window.PARTICLE_SETTINGS = {
   iconWind: 11.3877,
   iconWindSclX: 0,
   iconWindSclY: 1,
+
+  // --- proc_iridescent.tga, fitted (a texture, not a .mnu parameter) -----------------------------
+  // The colours the glint runs through, as 0xRRGGBB: a periodic Catmull-Rom loop, which `particles.js` winds into the
+  // texture's spiral. These 16 are fitted to the firmware's texture (RMS error 13/255).
+  iridescentPalette: [
+    0xf7f9bd, 0xf3dc60, 0xdc993c, 0xc06a49, 0xd4488a, 0xce34be, 0x964cde, 0x638af4,
+    0x357ce9, 0x496de7, 0x6d84ec, 0xa482f5, 0xda85d8, 0xc58b73, 0xb6a856, 0xb3bba0,
+  ],
 
   // --- Console output, modelled PPU side and mouse adapter (not from the firmware) ------------
   // the console's video output: below 1080p the particles grow and fade (PARTICLES_SPE.mnu), and on SD the whole scene
@@ -485,6 +494,14 @@ window.PARTICLE_SETTINGS_META = {
     help: 'Vertical part of the icon wind: icons moving up or down push the particles the same way.\n' +
       'PARTICLES_UI.mnu: icon wind scl y',
   },
+  iridescentPalette: {
+    type: 'palette', min: 3, max: 32,
+    help: "The colours the glint runs through, in a loop: a flake takes its colour from the way it tilts, and it " +
+      'shifts a little further along as the flake tilts further, as the disc shows, its top for a flake facing up. ' +
+      'Each swatch opens a colour picker; + adds a colour between the last and the first, - takes the last away. It ' +
+      'reaches the screen as it is while Color Control and Iridescent Exp are 1, as on the console.\n' +
+      'proc_iridescent.tga, fitted: a periodic Catmull-Rom loop through 16 colours',
+  },
   videoOutput: {
     type: 'select',
     options: [{ value: '1080', label: '1080p' }, { value: '720', label: '720p' }, { value: '480', label: 'SD' }],
@@ -603,8 +620,8 @@ window.PARTICLE_SETTINGS_LAYOUT = [
   { tab: 'Particles', section: 'Motion', keys: ['friction', 'spinTimeScale', 'deltaTime', 'gravity', 'windDirX',
     'windDirY', 'windDirZ', 'windScale', 'windScale10', 'brownianScale'] },
   { tab: 'Particles', section: 'Lighting', keys: ['spotPosX', 'spotPosY', 'spotPosZ', 'spotAttnX', 'spotAttnY',
-    'spotAttnZ', 'specularPower', 'specularCoeff', 'lambertCoeff', 'exposure', 'fresnel', 'colorControl',
-    'iridescentExp', 'globalAlpha'] },
+    'spotAttnZ', 'specularPower', 'specularCoeff', 'lambertCoeff', 'exposure', 'fresnel', 'globalAlpha'] },
+  { tab: 'Particles', section: 'Iridescence', keys: ['colorControl', 'iridescentExp', 'iridescentPalette'] },
   { tab: 'Particles', section: 'Size and focus', keys: ['sizeMiddle', 'sizeNear', 'sizeFar', 'nearFocus',
     'nearFocusDist', 'nearFocusPow', 'nearDarkness', 'nearFuzziness', 'farFocus', 'farFocusDist', 'farFocusPow',
     'farDarkness'] },

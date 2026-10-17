@@ -212,8 +212,10 @@ both passes of every capture, so the texture's colour reaches the specular as it
 - the colours run like thin-film interference: white, yellow, orange, magenta, violet,
   blue, lavender, pink, olive, and back to white.
 
-`particles.js` builds the texture from those 16 colours at start-up, the file's way up: mirrored,
-its error would be 85/255. It never reads the firmware texture. The fit is taken as close enough,
+`particles.js` builds the texture from `iridescentPalette`, those 16 colours by default, the
+file's way up: mirrored, its error would be 85/255. It never reads the firmware texture. The
+panel can change the palette, with any number of colours from 3 to 32, and the texture is
+built again from it. The fit is taken as close enough,
 and the texture is not pursued further.
 
 ## Frame captures

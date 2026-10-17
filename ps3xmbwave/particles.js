@@ -1,6 +1,7 @@
 'use strict';
 // Particle layer renderer: draws `PS3ParticlesReverse` in the XMB's two passes, lit iridescent flakes then glare,
-// with shaders re-authored from particles_quads / particles_second. Created by `index.html` with the spline surface.
+// with shaders re-authored from particles_quads / particles_second. Created by `index.html` with the spline surface;
+// its `PS3Iridescence`, the iridescent texture from a palette, `index.html` hands the panel for the palette's preview.
 
 (function () {
   function compile(gl, src, type) {
@@ -32,20 +33,23 @@
     return program;
   }
 
-  // proc_iridescent.tga rebuilt: its colour depends only on a spiral phase around the centre,
-  // t = (angle - 0.025 r - 0.00006 r^2) / 2pi with r in texels, read from 16 colours fitted to the firmware texture
-  // (periodic Catmull-Rom, RMS error 13/255).
-  const IRIDESCENT_TABLE = [
-    [247, 249, 189], [243, 220, 96], [220, 153, 60], [192, 106, 73], [212, 72, 138], [206, 52, 190],
-    [150, 76, 222], [99, 138, 244], [53, 124, 233], [73, 109, 231], [109, 132, 236], [164, 130, 245],
-    [218, 133, 216], [197, 139, 115], [182, 168, 86], [179, 187, 160],
-  ];
+  // proc_iridescent.tga rebuilt from a palette, `iridescentPalette`: its colour depends only on a spiral phase around
+  // the centre, t = (angle - 0.025 r - 0.00006 r^2) / 2pi with r in texels, read from the palette's colours as a
+  // periodic Catmull-Rom loop. The settings' default is 16 colours fitted to the firmware texture.
+  const IRIDESCENT_SIZE = 128;
 
-  function createIridescentTexture(gl) {
-    const size = 128;
-    const n = IRIDESCENT_TABLE.length;
+  // A palette the texture can be built from: one or more 0xRRGGBB colours.
+  function isPalette(palette) {
+    return Array.isArray(palette) && palette.length > 0 && palette.every(Number.isFinite);
+  }
+
+  // The texture's texels, its rows in the order it holds them, as { width, height, data }.
+  function iridescentTexels(palette) {
+    const size = IRIDESCENT_SIZE;
+    const n = palette.length;
+    const rgb = palette.map(function (colour) { return [(colour >> 16) & 255, (colour >> 8) & 255, colour & 255]; });
     const c = (size - 1) / 2;
-    const px = new Uint8Array(size * size * 4);
+    const px = new Uint8ClampedArray(size * size * 4);
     for (let j = 0; j < size; j++) {
       for (let i = 0; i < size; i++) {
         const dx = i - c;
@@ -55,10 +59,10 @@
         const u = (phase - Math.floor(phase)) * n - 0.5;
         const k = Math.floor(u);
         const f = u - k;
-        const p0 = IRIDESCENT_TABLE[(k - 1 + n) % n];
-        const p1 = IRIDESCENT_TABLE[(k + n) % n];
-        const p2 = IRIDESCENT_TABLE[(k + 1) % n];
-        const p3 = IRIDESCENT_TABLE[(k + 2) % n];
+        const p0 = rgb[(k - 1 + n) % n];
+        const p1 = rgb[(k + n) % n];
+        const p2 = rgb[(k + 1) % n];
+        const p3 = rgb[(k + 2) % n];
         const o = (j * size + i) * 4;
         for (let ch = 0; ch < 3; ch++) {
           const v = 0.5 * (2 * p1[ch] + (p2[ch] - p0[ch]) * f +
@@ -69,13 +73,36 @@
         px[o + 3] = 255;
       }
     }
+    return { width: size, height: size, data: px };
+  }
+
+  // The texture as the screen sees it, for the panel's preview: upside down, so that its top is what a flake facing up
+  // reads, and clear outside the disc the programs read, the normal's x and y being inside the unit circle.
+  function iridescentPreview(palette) {
+    const image = iridescentTexels(palette);
+    const size = image.width;
+    const c = (size - 1) / 2;
+    const rowBytes = size * 4;
+    const px = new Uint8ClampedArray(image.data.length);
+    for (let j = 0; j < size; j++) {
+      px.set(image.data.subarray((size - 1 - j) * rowBytes, (size - j) * rowBytes), j * rowBytes);
+      for (let i = 0; i < size; i++) {
+        if (Math.hypot(i - c, j - c) > size / 2) px[j * rowBytes + i * 4 + 3] = 0;
+      }
+    }
+    return { width: size, height: size, data: px };
+  }
+
+  window.PS3Iridescence = { SIZE: IRIDESCENT_SIZE, texels: iridescentTexels, preview: iridescentPreview };
+
+  function createIridescentTexture(gl) {
     const tex = gl.createTexture();
     gl.bindTexture(gl.TEXTURE_2D, tex);
     gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
     gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
     gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
     gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
-    gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA8, size, size, 0, gl.RGBA, gl.UNSIGNED_BYTE, px);
+    gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA8, IRIDESCENT_SIZE, IRIDESCENT_SIZE, 0, gl.RGBA, gl.UNSIGNED_BYTE, null);
     return tex;
   }
 
@@ -327,6 +354,19 @@
     ];
     passes.forEach(function (pass) { pass.u = uniformMap(gl, pass.program); });
     const iridescentTex = createIridescentTexture(gl);
+    let iridescentPalette = null; // the palette the texture was last built from
+
+    // Builds the texture again when the palette is a new one. It is only ever replaced, never changed in place, so a
+    // new palette is a new array; one it cannot be built from leaves the last.
+    function updateIridescent() {
+      const palette = settings.iridescentPalette;
+      if (palette === iridescentPalette || !isPalette(palette)) return;
+      iridescentPalette = palette;
+      const image = iridescentTexels(palette);
+      gl.bindTexture(gl.TEXTURE_2D, iridescentTex);
+      gl.texSubImage2D(gl.TEXTURE_2D, 0, 0, 0, image.width, image.height, gl.RGBA, gl.UNSIGNED_BYTE, image.data);
+    }
+    updateIridescent();
 
     const vao = gl.createVertexArray();
     gl.bindVertexArray(vao);
@@ -404,6 +444,7 @@
       gl.enable(gl.BLEND);
       gl.blendFunc(gl.ONE, gl.ONE);
       gl.activeTexture(gl.TEXTURE0);
+      updateIridescent();
       gl.bindTexture(gl.TEXTURE_2D, iridescentTex);
       gl.bindVertexArray(vao);
       passes.forEach(function (pass) {
