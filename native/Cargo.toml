@@ -1,6 +1,6 @@
 [package]
 name = "nagare"
-version = "0.1.0"
+version = "0.1.1"
 edition = "2021"
 description = "Native port of the PS3 XMB wave and particles recreation, with a Windows desktop-wallpaper mode"
 license = "MIT"
