@@ -1,4 +1,4 @@
-﻿; Nagare's Windows installer, for Inno Setup 6 (https://jrsoftware.org/isinfo.php). installer.ps1, beside this folder,
+﻿; Nagare's Windows installer, for Inno Setup 6 (https://jrsoftware.org/isinfo.php). cargo xtask installer, from the folder above,
 ; builds the release exes and compiles this into target\installer\nagare-setup-VERSION.exe.
 ;
 ; It installs for the user alone, with no administrator: into %LOCALAPPDATA%\Programs\Nagare, where Windows keeps

@@ -70,9 +70,9 @@ lists everything.
 
 ## Installing (Windows)
 
-`installer.ps1` builds the release exes and packages them with [Inno Setup 6](https://jrsoftware.org/isinfo.php)
-(`winget install JRSoftware.InnoSetup`) into `target\installer\nagare-setup-VERSION.exe`; `-NoBuild` packages the
-exes already built, a PGO build's say, and `-Install` then installs it silently over the installed copy. The script is
+`cargo xtask installer` builds the release exes and packages them with [Inno Setup 6](https://jrsoftware.org/isinfo.php)
+(`winget install JRSoftware.InnoSetup`) into `target\installer\nagare-setup-VERSION.exe`; `--no-build` packages the
+exes already built, a PGO build's say, and `--install` then installs it silently over the installed copy. The script is
 `installer\nagare.iss`, and [installer/INSTALLER.md](installer/INSTALLER.md) has the whole story: building, silent
 installs, and how the wizard's look is made. The installer:
 
@@ -923,25 +923,46 @@ the main thread for the CPU and the numbers wander.
 
 The release profile uses thin LTO over 16 codegen units: a change rebuilds in about 32 s, against 110 s with fat LTO
 and one unit, for a few percent of the CPU's frame time (rust-lld linked slower here, 79 s, and was left out).
-`pgo.ps1` sets fat LTO and one unit for its own builds (`CARGO_PROFILE_RELEASE_*`), so a release keeps the last few
-percent. It builds with profile-guided optimisation: an
-instrumented build runs twelve `--test` runs through both glare modes, every tone curve, auto exposure, the noise, the
-desaturation, the overlay and the day cycle, under OpenGL and under Vulkan; LLVM merges what they recorded; and the release build is optimised with
-it (it needs `rustup component add llvm-tools`; close a running instance first, whose exe is locked). The main thread's
-CPU work per frame, at 60 fps on 1280 × 720, four runs each:
+The PGO builds set fat LTO and one unit for themselves (`CARGO_PROFILE_RELEASE_*`), so a release keeps the last few
+percent. `cargo xtask pgo` builds with profile-guided optimisation:
+1. an instrumented build (`cargo xtask pgo-instrument`);
+2. twelve `--test` runs with it, through both glare modes, every tone curve, auto exposure, the noise, the
+   desaturation, the overlay and the day cycle, under OpenGL and under Vulkan (`cargo xtask pgo-train`);
+3. LLVM merges what they recorded into `pgo\nagare.profdata`, with the compiler that recorded it in
+   `pgo\nagare.profdata.txt` (`cargo xtask pgo-merge`; it needs `rustup component add llvm-tools`, which
+   `rust-toolchain.toml` lists);
+4. the release build is optimised with it (`cargo xtask pgo-build`).
+
+The main thread's CPU work per frame, at 60 fps on 1280 × 720, four runs each:
 
 | Build                     | Wave sim | Particle sim | CPU work |
 | ------------------------- | -------- | ------------ | -------- |
 | thin LTO (the profile)    | 0.473 ms | 0.172 ms     | 0.720 ms |
 | fat LTO, 1 codegen unit   | 0.441 ms | 0.172 ms     | 0.687 ms |
-| fat LTO + PGO (`pgo.ps1`) | 0.330 ms | 0.171 ms     | 0.575 ms |
+| fat LTO + PGO             | 0.330 ms | 0.171 ms     | 0.575 ms |
 
-`.\pgo.ps1 -Save` also keeps the merged profile in `pgo\nagare.profdata`, with the compiler that recorded it in
-`pgo\nagare.profdata.txt`, and `.\pgo.ps1 -Use` builds from that profile without training. The repository's release
-workflow (`.github/workflows/native-release.yml`) runs `-Use`, since the training draws the scene and needs a GPU, which
-the workflow's machines lack: record the profile on a PC and commit `pgo\`. A profile fits only the compiler that
-recorded it, which `rust-toolchain.toml` pins, and the code it was recorded on; code changed since merely goes
-unoptimised, so record it again before a release whose code has moved much.
+The repository's release workflow (`.github/workflows/native-release.yml`) runs only `cargo xtask pgo-build`, since
+the training draws the scene and needs a GPU, which the workflow's machines lack. Record the profile on a PC and
+commit `pgo\`. A profile fits only the compiler that recorded it, which `rust-toolchain.toml` pins, and the code it was
+recorded on; code changed since merely goes unoptimised, so each commit records it again (`cargo xtask ready`).
+
+#### `cargo xtask`
+
+The build tasks are a small Rust program, `xtask/` (standard library only), which Cargo runs through the alias in
+`.cargo/config.toml`: they work wherever Cargo does, with nothing else installed. From `native/`:
+
+| Task | What it does |
+| --- | --- |
+| `cargo xtask build` | the quick release build (thin LTO) |
+| `cargo xtask check` | what CI checks: clippy for Windows, Linux and macOS, warnings as errors, then the tests |
+| `cargo xtask pgo` | the whole PGO pass above, about 20 minutes; or step by step: `pgo-instrument`, `pgo-train [SECONDS]`, `pgo-merge`, `pgo-build` |
+| `cargo xtask installer [--no-build] [--install]` | the installer, from a fresh build or (`--no-build`) the exes already built; `--install` installs it silently |
+| `cargo xtask shots DIR [--exe EXE] [-- ARGS...]` | the regression shots: OpenGL, Vulkan, Vulkan supersampled and OpenGL without the enhancements, at 6 s and 25 s |
+| `cargo xtask compare DIR1 DIR2` | two shots folders compared byte for byte |
+| `cargo xtask ready` | everything before a commit: `check`, `pgo`, then `installer --no-build --install` |
+
+A Nagare running from `target\release` would lock its exe against the build; the tasks move such an exe aside (to
+`.old`, where it keeps running) rather than stopping it.
 
 Every build draws the same image to the byte. About as much CPU again goes to the OpenGL driver's own thread, which
 carries out the frame's GL calls - the wave's mesh, 512 KB uploaded every frame, among them; under Vulkan with the
@@ -1042,7 +1063,7 @@ opens again. Everything is drawn on the CPU, in linear light, several samples a 
   `--set` takes it. Render writes the
   pictures at the sizes Setup picks from by DPI, `theme.json` and `theme.iss`, the directives `nagare.iss` takes in.
   Any picture can be replaced by one's own (keep my own pictures stops Render writing over them).
-  **Build the installer** and **Build and install** run `installer.ps1`, its output shown as it comes.
+  **Build the installer** and **Build and install** run `cargo xtask installer`, its output shown as it comes.
 
 The font lists offer every font installed, Windows' and the user's own: each .ttf and .otf, and each face of a
 collection (.ttc, Yu Gothic's say) by its own name, saved as the file's name and the face's index (`YuGothB.ttc#1`).

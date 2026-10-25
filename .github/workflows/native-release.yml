@@ -1,5 +1,5 @@
 # Builds a Nagare release: the exes optimised with the PGO profile kept in native/pgo/ (recorded on a PC with
-# `.\pgo.ps1 -Save`, since the training draws the scene and wants a GPU), packaged by Inno Setup, and - once SignPath
+# `cargo xtask pgo`, since the training draws the scene and wants a GPU), packaged by Inno Setup, and - once SignPath
 # is set up (below) - code-signed, the exes before they are packaged and the installer after. A tag v* makes a draft
 # GitHub release of it; run by hand, it leaves the files as the run's artifact.
 #
@@ -50,7 +50,7 @@ jobs:
 
       # Fat LTO over one codegen unit, optimised with the kept profile; no training here.
       - name: Build (PGO)
-        run: .\pgo.ps1 -Use
+        run: cargo xtask pgo-build
 
       - name: Stage the exes
         run: |
@@ -81,7 +81,7 @@ jobs:
         run: Copy-Item target\signed\*.exe target\release -Force
 
       - name: Package
-        run: .\installer.ps1 -NoBuild
+        run: cargo xtask installer --no-build
 
       # Signing, round two: the installer.
       - name: Upload the installer for signing

@@ -1,6 +1,6 @@
 //! The Installer tab: how the setup wizard looks - light, dark or as Windows is, Inno Setup's built-in styles, its
 //! background colours - and its pictures, made from two shots of the scene and the Installer icon tab's box; then
-//! building the installer, and installing it, with installer.ps1, its output shown as it comes.
+//! building the installer, and installing it, with `cargo xtask installer`, its output shown as it comes.
 //!
 //! Everything lands in `installer/theme`: `theme.json` (these knobs), `theme.iss` (the [Setup] directives they make,
 //! which nagare.iss includes), and the pictures, which are templates as much as output:
@@ -376,7 +376,7 @@ pub fn render_all(t: &Theme, boxed: &package::Design, logo: &logo::Design, fonts
     Ok(format!("wrote the pictures, theme.json and theme.iss into {}", dir.display()))
 }
 
-/// installer.ps1 running, and what it has said.
+/// `cargo xtask installer` running, and what it has said.
 struct Job {
     lines: Arc<Mutex<Vec<String>>>,
     running: Arc<AtomicBool>,
@@ -385,9 +385,10 @@ struct Job {
 impl Job {
     fn start(args: &[&str], ctx: &egui::Context) -> Result<Job, String> {
         use std::io::BufRead;
-        let mut command = std::process::Command::new("powershell.exe");
+        // The xtask alias lives in native/.cargo/config.toml, so cargo runs from native/.
+        let mut command = std::process::Command::new("cargo");
         command
-            .args(["-NoProfile", "-ExecutionPolicy", "Bypass", "-File", "installer.ps1"])
+            .args(["xtask", "installer"])
             .args(args)
             .current_dir(native_dir())
             .stdout(std::process::Stdio::piped())
@@ -398,8 +399,8 @@ impl Job {
             // No console window of its own.
             command.creation_flags(0x0800_0000);
         }
-        let mut child = command.spawn().map_err(|e| format!("powershell: {e}"))?;
-        let lines = Arc::new(Mutex::new(vec![format!("> installer.ps1 {}", args.join(" "))]));
+        let mut child = command.spawn().map_err(|e| format!("cargo: {e} (is Rust installed?)"))?;
+        let lines = Arc::new(Mutex::new(vec![format!("> cargo xtask installer {}", args.join(" "))]));
         let running = Arc::new(AtomicBool::new(true));
         let mut readers = Vec::new();
         let streams: [Box<dyn std::io::Read + Send>; 2] = [Box::new(child.stdout.take().unwrap()), Box::new(child.stderr.take().unwrap())];
@@ -665,14 +666,14 @@ impl Tab {
         ui.heading("Build");
         let running = self.job.as_ref().is_some_and(|j| j.running.load(Ordering::Relaxed));
         ui.horizontal(|ui| {
-            ui.checkbox(&mut self.no_build, "package the exes already built").on_hover_text("installer.ps1 -NoBuild: no cargo build first");
+            ui.checkbox(&mut self.no_build, "package the exes already built").on_hover_text("--no-build: no cargo build first");
         });
         ui.horizontal(|ui| {
             let mut start = None;
-            if ui.add_enabled(!running, egui::Button::new("Build the installer")).on_hover_text("installer.ps1: the release exes, then target\\installer\\nagare-setup-VERSION.exe").clicked() {
+            if ui.add_enabled(!running, egui::Button::new("Build the installer")).on_hover_text("cargo xtask installer: the release exes, then target\\installer\\nagare-setup-VERSION.exe").clicked() {
                 start = Some(false);
             }
-            if ui.add_enabled(!running, egui::Button::new("Build and install")).on_hover_text("installer.ps1 -Install: then installs it, silently, over the installed copy").clicked() {
+            if ui.add_enabled(!running, egui::Button::new("Build and install")).on_hover_text("cargo xtask installer --install: then installs it, silently, over the installed copy").clicked() {
                 start = Some(true);
             }
             if let Some(install) = start {
@@ -685,10 +686,10 @@ impl Tab {
                 }
                 let mut args = Vec::new();
                 if self.no_build {
-                    args.push("-NoBuild");
+                    args.push("--no-build");
                 }
                 if install {
-                    args.push("-Install");
+                    args.push("--install");
                 }
                 match Job::start(&args, ctx) {
                     Ok(job) => self.job = Some(job),

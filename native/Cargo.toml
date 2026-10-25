@@ -86,7 +86,7 @@ windows = { version = "0.62.2", features = ["Media_Control", "Foundation", "Foun
 opt-level = 1
 
 # Thin LTO over 16 units: a change rebuilds in about 30 s rather than 110, for a few percent of the CPU's frame time.
-# pgo.ps1 builds a release with fat LTO and one unit, the last few percent.
+# The PGO builds (cargo xtask pgo) take fat LTO and one unit, the last few percent.
 [profile.release]
 lto = "thin"
 codegen-units = 16

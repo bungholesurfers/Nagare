@@ -1,0 +1,10 @@
+[package]
+name = "xtask"
+version = "0.1.0"
+edition = "2021"
+description = "Nagare's build tasks: `cargo xtask <task>`, run from native/ (the alias is in .cargo/config.toml)"
+license = "MIT"
+publish = false
+
+# Standard library only, so that it builds in seconds and needs nothing beyond Cargo.
+[dependencies]

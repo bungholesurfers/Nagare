@@ -116,8 +116,20 @@ cargo run --release                 # behind the desktop icons, with a tray icon
 cargo run --release -- --window     # in a window, with the settings panel
 ```
 
-To build a release, use `.\pgo.ps1` (profile-guided optimisation, about 20 minutes) and then `.\installer.ps1 -NoBuild`
-([Inno Setup 6](https://jrsoftware.org/isinfo.php)). [native/README.md](native/README.md#build-and-pgo) explains both.
+The build tasks are `cargo xtask` commands, a small Rust program in `native/xtask/`, so nothing else needs installing.
+Run them from `native/`:
+
+```bash
+cargo xtask build                       # quick release build
+cargo xtask check                       # clippy for Windows, Linux and macOS, and the tests, as CI runs them
+cargo xtask pgo                         # profile-guided optimised build, about 20 minutes (needs a GPU)
+cargo xtask installer --no-build        # package what's built (Inno Setup 6); --install installs it too
+cargo xtask ready                       # everything before a commit: check, pgo, installer --no-build --install
+cargo xtask help                        # the rest
+```
+
+The installer needs [Inno Setup 6](https://jrsoftware.org/isinfo.php). [native/README.md](native/README.md#build-and-pgo)
+explains each task.
 
 ### GitHub workflows
 
@@ -127,7 +139,7 @@ To build a release, use `.\pgo.ps1` (profile-guided optimisation, about 20 minut
   kept in `native/pgo/`, packages the installer, signs everything once signing is set up, and drafts a GitHub
   release. The release's body comes from [`.github/release-notes.md`](.github/release-notes.md), with the version
   filled into its download links.
-  - The PGO training draws the scene, so it needs a real GPU. Record the profile on a PC with `.\pgo.ps1 -Save` and
+  - The PGO training draws the scene, so it needs a real GPU. Record the profile on a PC with `cargo xtask pgo` and
     commit `native/pgo/`.
   - The release also gets Software Update's signed manifest, `nagare-update.json`, which needs the repository secret
     `NAGARE_UPDATE_KEY`. Copies of Nagare move to a release only once its tag is in

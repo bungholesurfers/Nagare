@@ -1,5 +1,5 @@
 # The compiler Nagare is built with, here and in the GitHub workflows. A PGO profile (pgo\nagare.profdata) only fits
-# the compiler that recorded it, so a change here wants .\pgo.ps1 -Save run again with the new one.
+# the compiler that recorded it, so a change here wants cargo xtask pgo run again with the new one.
 [toolchain]
 channel = "1.99.1"
 components = ["clippy", "llvm-tools"]

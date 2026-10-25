@@ -50,6 +50,9 @@ jobs:
       - name: Clippy (macOS)
         run: cargo clippy --release --target aarch64-apple-darwin -- -D warnings
 
+      - name: Clippy (xtask, the build tasks)
+        run: cargo clippy --manifest-path xtask/Cargo.toml --target-dir target/xtask -- -D warnings
+
       - name: Tests
         run: cargo test --release
 

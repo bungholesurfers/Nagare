@@ -4,7 +4,7 @@
 //! - Installer icon (`package.rs`): a glass box with the logo on one side and "PKG" on the other, the installer's icon,
 //!   rendered into `installer/theme`.
 //! - Installer (`installer.rs`): the setup wizard's look and pictures, into `installer/theme`, which
-//!   `installer/nagare.iss` takes in; and building the installer, and installing it, with `installer.ps1`.
+//!   `installer/nagare.iss` takes in; and building the installer, and installing it, with `cargo xtask installer`.
 //!
 //! Each tab's Render writes its files; the designs are kept beside them (`design.json`, `box.json`, `theme.json`) and
 //! opened again. Without a window:

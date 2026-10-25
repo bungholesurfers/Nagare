@@ -15,19 +15,20 @@ keeps per-user programs - with a Start menu shortcut and an entry in Settings > 
 
 ## Building it
 
-From `native\`, in PowerShell:
+From `native\`:
 
-```powershell
-.\installer.ps1             # builds the release exes, then the installer
-.\installer.ps1 -NoBuild    # packages the exes already in target\release (after pgo.ps1, for a release)
-.\installer.ps1 -Install    # builds, then installs it silently over the installed copy
+```
+cargo xtask installer                        # builds the release exes, then the installer
+cargo xtask installer --no-build             # packages the exes already in target\release (after cargo xtask pgo, for a release)
+cargo xtask installer --install              # builds, then installs it silently over the installed copy
+cargo xtask installer --no-build --install   # both
 ```
 
 The installer lands in `target\installer\nagare-setup-VERSION.exe`, the version being `Cargo.toml`'s. A Nagare running
-from `target\release` is stopped first, since its exe is about to be replaced.
+from `target\release` is moved aside first (to `.old`, where it keeps running), since its exe is about to be replaced.
 
 Or from the customizer, `cargo run --release --bin nagare-customize`: its **Installer** tab has **Build the installer**
-and **Build and install**, which run the same script and show what it says.
+and **Build and install**, which run the same task and show what it says.
 
 ## What it does
 

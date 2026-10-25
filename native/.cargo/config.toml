@@ -1,0 +1,4 @@
+# `cargo xtask <task>`: Nagare's build tasks (xtask/), run from native/. `cargo xtask help` lists them.
+# The alias only names a command; it changes nothing about how Nagare itself builds.
+[alias]
+xtask = "run --quiet --manifest-path xtask/Cargo.toml --target-dir target/xtask --"
