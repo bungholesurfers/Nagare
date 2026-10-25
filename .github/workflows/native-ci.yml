@@ -1,0 +1,66 @@
+# Builds Nagare (native/) on every push and pull request that touches it: clippy for Windows, Linux and macOS, the
+# tests, and a plain release build, whose exes are kept as the run's artifact for trying out. Releases, built with
+# PGO and packaged, are native-release.yml's.
+name: Native CI
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'native/**'
+      - '.github/workflows/native-ci.yml'
+  pull_request:
+    paths:
+      - 'native/**'
+      - '.github/workflows/native-ci.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: native-ci-${{ github.ref }}
+  cancel-in-progress: true
+
+defaults:
+  run:
+    working-directory: native
+
+jobs:
+  build:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      # rust-toolchain.toml names the compiler and its components; `rustup install` installs them.
+      - name: Toolchain
+        run: |
+          rustup install
+          rustup show active-toolchain
+          rustup target add x86_64-unknown-linux-gnu aarch64-apple-darwin
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: native
+
+      - name: Clippy (Windows)
+        run: cargo clippy --release -- -D warnings
+      - name: Clippy (Linux)
+        run: cargo clippy --release --target x86_64-unknown-linux-gnu -- -D warnings
+      - name: Clippy (macOS)
+        run: cargo clippy --release --target aarch64-apple-darwin -- -D warnings
+
+      - name: Tests
+        run: cargo test --release
+
+      - name: Build
+        run: cargo build --release
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: nagare-${{ github.sha }}
+          path: |
+            native/target/release/nagare.exe
+            native/target/release/nagare-watchdog.exe
+            native/target/release/nagare-customize.exe
+          if-no-files-found: error
