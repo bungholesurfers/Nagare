@@ -367,7 +367,7 @@ fn agent() -> ureq::Agent {
 }
 
 /// GETs `url`, following at most five redirects, each checked by `allowed`, and returns the body's reader, which fails
-/// past `limit` bytes.
+/// a byte past `limit` bytes.
 #[cfg(windows)]
 fn get(agent: &ureq::Agent, url: &str, limit: u64) -> Result<Box<dyn std::io::Read + Send>, String> {
     let mut url = url.to_string();
@@ -391,7 +391,10 @@ fn get(agent: &ureq::Agent, url: &str, limit: u64) -> Result<Box<dyn std::io::Re
         if response.headers().get("content-length").and_then(|l| l.to_str().ok()).and_then(|l| l.parse::<u64>().ok()).is_some_and(|n| n > limit) {
             return Err(format!("{} sent more than expected", host(&url)));
         }
-        return Ok(Box::new(response.into_body().into_with_config().limit(limit).reader()));
+        // ureq's limit takes the read that finds the body's end, after exactly \`limit\` bytes, for one too many: a body
+        // of just \`limit\` bytes - an installer of exactly its manifest's size - would fail at its last read. A byte
+        // more lets that read through; what came is held to its size by the caller (the manifest's size, exactly).
+        return Ok(Box::new(response.into_body().into_with_config().limit(limit.saturating_add(1)).reader()));
     }
     Err("too many redirects".into())
 }
