@@ -106,13 +106,23 @@ jobs:
         if: env.SIGN == 'true'
         run: Copy-Item target\signed-setup\*.exe target\installer -Force
 
-      # The installer, and the two exes zipped for those who would rather not install.
+      # The installer, the two exes zipped for those who would rather not install, and Software Update's manifest of
+      # the installer, signed with the release key (src/signing.rs). Without the secret NAGARE_UPDATE_KEY the release
+      # has no manifest, and no copy of Nagare updates to it by itself.
       - name: Collect
+        env:
+          NAGARE_UPDATE_KEY: ${{ secrets.NAGARE_UPDATE_KEY }}
         run: |
           $v = '${{ steps.version.outputs.value }}'
           New-Item -ItemType Directory -Force target\out | Out-Null
           Copy-Item "target\installer\nagare-setup-$v.exe" target\out
           Compress-Archive -Path target\release\nagare.exe, target\release\nagare-watchdog.exe -DestinationPath "target\out\nagare-portable-$v.zip" -Force
+          if ($env:NAGARE_UPDATE_KEY) {
+            .\target\release\nagare-release.exe manifest "target\out\nagare-setup-$v.exe" $v target\out
+            if ($LASTEXITCODE -ne 0) { throw 'the update manifest failed' }
+          } else {
+            Write-Warning 'NAGARE_UPDATE_KEY is not set: this release has no update manifest, so nothing updates to it by itself'
+          }
           $sums = Get-ChildItem target\out | ForEach-Object { "{0}  {1}" -f (Get-FileHash $_.FullName).Hash.ToLower(), $_.Name }
           $sums | Set-Content target\out\SHA256SUMS.txt -Encoding ascii
           $sums

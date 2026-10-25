@@ -22,6 +22,11 @@ path = "src/bin/watchdog.rs"
 name = "nagare-customize"
 path = "src/bin/customize/main.rs"
 
+# The release workflow's helper: makes the updater's signing key, and writes and signs each release's manifest.
+[[bin]]
+name = "nagare-release"
+path = "src/bin/release.rs"
+
 [dependencies]
 glow = "0.17"
 glutin = "0.32"
@@ -49,6 +54,12 @@ libc = "0.2"
 
 [target.'cfg(windows)'.dependencies]
 tray-icon = "0.26"
+# The updater (update.rs): HTTPS through rustls, with Mozilla's roots bundled rather than the system's; the manifest's
+# Ed25519 signature; the installer's SHA-256; random delays. Pinned to versions some weeks old.
+ureq = { version = "=3.4.2", default-features = false, features = ["rustls"] }
+ed25519-dalek = { version = "=3.0.0", default-features = false, features = ["zeroize"] }
+sha2 = "=0.11.0"
+getrandom = "=0.4.3"
 windows-sys = { version = "0.59", features = [
   "Win32_Foundation",
   "Win32_Graphics_Gdi",

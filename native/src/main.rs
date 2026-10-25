@@ -41,10 +41,13 @@ mod presence;
 mod scene;
 mod settings;
 mod settings_window;
+mod signing;
 mod sharpen;
 mod sim;
 mod spline;
 mod steamboat;
+mod update;
+mod version;
 #[cfg(windows)]
 mod tray;
 #[cfg(windows)]
@@ -114,6 +117,8 @@ nagare [--wallpaper | --window] [--no-ui | --ui] [--fps N] [--perf-overlay N] [-
   --config FILE      use FILE as the config for this run, in place of the usual one
   --first-start      play the first start's intro this run: the benchmark, the epilepsy warning and the card (with
                      --test too; it saves the benchmark's result unless --no-save)
+  --update-fetch URL fetch URL as Software Update fetches its files (HTTPS to GitHub alone, each redirect checked),
+                     say what came, and exit
 
 Testing and profiling:
   --test             a repeatable run: a 1280 x 720 window (unless --wallpaper), no panel (unless --ui), every
@@ -205,6 +210,14 @@ const BENCH_MARU_SEC: f64 = 13.0;
 /// The smallest blur the settings' blur draws, in points: what one pass at half the size blurs, however small the
 /// radius asked for.
 const BLUR_FLOOR: f64 = 3.0;
+
+/// Software Update: how long into the XMB's start the card asking about it waits, what it says, and the random
+/// waits, in seconds: before a run's first check, between checks, and after a check that failed.
+const CONSENT_AFTER: f64 = 8.0;
+const CONSENT_TEXT: &str = "Nagare checks GitHub for a newer version every day or two, and installs it for you. Nothing about you or your PC is sent, only the request itself. You can turn this off at any time in the settings, under Software Update.";
+const UPDATE_FIRST: (f64, f64) = (60.0, 3600.0);
+const UPDATE_EVERY: (f64, f64) = (24.0 * 3600.0, 48.0 * 3600.0);
+const UPDATE_RETRY: (f64, f64) = (2.0 * 3600.0, 6.0 * 3600.0);
 
 /// How long into the XMB's start the pokes' tip waits before it shows.
 const TIP_AFTER: f64 = 30.0;
@@ -648,6 +661,16 @@ struct App {
     poke_tip: bool,
     tip_close: Option<(f64, f64, f64, f64)>,
     xmb_at: f64,
+    /// Software Update (update.rs): the updater; whether the user has agreed to its checks (None until asked, by the
+    /// card on the scene), whether it checks by itself, when it next does (seconds since 1970, kept in the config),
+    /// whether the last finished check has set that, and where the card's buttons were laid out (true for OK and ×).
+    updater: update::Updater,
+    update_consent: Option<bool>,
+    update_auto: bool,
+    update_next: f64,
+    update_scheduled: bool,
+    update_tidied: bool,
+    consent_hits: Vec<(bool, (f64, f64, f64, f64))>,
     intro_seen: bool,
     /// The first start's word on the tray icon, NORB_SEC after the XMB's start that follows the card: whether it is
     /// still to come, and when it is due.
@@ -829,6 +852,18 @@ impl App {
         // The pokes' tip, until dismissed; a test's frames show none.
         let poke_tip = !saved.as_ref().and_then(|v| v["pokeTipDismissed"].as_bool()).unwrap_or(false) && options.test.is_none();
         config_saved["pokeTipDismissed"] = (!poke_tip && options.test.is_none()).into();
+        // Software Update: asked about once; on unless the answer was no; the first check of a run a random 1 to 60
+        // minutes in, and never before the one the last run set (NAGARE_UPDATE_NOW=1: 5 s in, asked or not, to try it).
+        let update_consent = saved.as_ref().and_then(|v| v["updateConsent"].as_bool());
+        let update_auto = saved.as_ref().and_then(|v| v["updateAuto"].as_bool()).unwrap_or(update_consent != Some(false));
+        let update_now = std::env::var("NAGARE_UPDATE_NOW").is_ok_and(|v| v == "1");
+        let update_next = if update_now {
+            update::unix_now() + 5.0
+        } else {
+            let saved_next = saved.as_ref().and_then(|v| v["updateNext"].as_f64()).unwrap_or(0.0);
+            saved_next.max(update::unix_now() + update::random_secs(UPDATE_FIRST.0, UPDATE_FIRST.1))
+        };
+        let update_consent = if update_now { Some(true) } else { update_consent };
         let fps_auto = saved.as_ref().and_then(|v| v["fpsAuto"].as_bool()).unwrap_or(true);
         config_saved["fpsAuto"] = fps_auto.into();
         let machine = machine::load();
@@ -929,6 +964,13 @@ impl App {
             poke_tip,
             tip_close: None,
             xmb_at: 0.0,
+            updater: update::Updater::new(),
+            update_consent,
+            update_auto: update_auto || update_now,
+            update_next,
+            update_scheduled: true,
+            update_tidied: false,
+            consent_hits: Vec::new(),
             refresh_hz: None,
             drivers_checked: 0.0,
             best_at: None,
@@ -999,10 +1041,117 @@ impl App {
         self.intro.as_ref().is_some_and(|i| i.running())
     }
 
+    /// Whether the card asking about Software Update shows: on Windows, until answered, CONSENT_AFTER into the XMB's
+    /// start, once nothing else has the screen - the intro, the epilepsy warning. A test's frames show none.
+    fn consent_showing(&self) -> bool {
+        cfg!(windows)
+            && self.options.test.is_none()
+            && self.update_consent.is_none()
+            && self.frame_now - self.xmb_at >= CONSENT_AFTER
+            && !self.intro_showing()
+            && self.warning_look.is_none()
+    }
+
+    /// A click at (x, y), in the window's pixels, on the card's OK or × (yes) or No: the answer, kept. Yes checks a
+    /// random 1 to 60 minutes later; no turns Auto-check off.
+    fn consent_click(&mut self, x: f64, y: f64) -> bool {
+        if !self.consent_showing() {
+            return false;
+        }
+        let hit = self.consent_hits.iter().find(|(_, (x0, y0, x1, y1))| x >= *x0 && y >= *y0 && x < *x1 && y < *y1).map(|(yes, _)| *yes);
+        let Some(yes) = hit else { return false };
+        self.update_consent = Some(yes);
+        self.update_auto = yes;
+        if yes {
+            self.update_next = update::unix_now() + update::random_secs(UPDATE_FIRST.0, UPDATE_FIRST.1);
+        }
+        self.consent_hits.clear();
+        true
+    }
+
+    /// Whether this copy can install an update itself: one the installer installed. Another hears of a new version
+    /// and points at the releases' page.
+    fn update_installable(&self) -> bool {
+        cfg!(windows) && self.autostart.installed.is_some()
+    }
+
+    /// Starts a check now, if none is under way: `automatic` for Auto-check's, which leaves alone a version whose
+    /// installer ran before without taking; Check now tries it again.
+    fn check_for_update(&mut self, automatic: bool) {
+        if !self.updater.status().busy() {
+            self.update_scheduled = false;
+            self.updater.start(self.update_installable(), automatic);
+        }
+    }
+
+    /// Software Update's part of each wait: a finished check sets when the next is due (24 to 48 hours on, or 2 to 6
+    /// after a failure), Auto-check checks when it is, and a downloaded installer runs - once nothing is full screen,
+    /// so that a game is not interrupted.
+    fn update_tick(&mut self) {
+        if !cfg!(windows) || self.options.test.is_some() {
+            return;
+        }
+        let now = update::unix_now();
+        let status = self.updater.status();
+        if let (Some(ok), false) = (status.finished(), self.update_scheduled) {
+            self.update_scheduled = true;
+            let (low, high) = if ok { UPDATE_EVERY } else { UPDATE_RETRY };
+            self.update_next = now + update::random_secs(low, high);
+        }
+        let waiting = matches!(status, update::Status::Ready { .. });
+        if self.update_consent == Some(true) && self.update_auto && now >= self.update_next && !status.busy() && !waiting {
+            self.check_for_update(true);
+        }
+        // A minute in, what a finished update left behind goes (the installer that started this Nagare is done by then).
+        if !self.update_tidied && self.frame_now > 60.0 {
+            self.update_tidied = true;
+            update::tidy();
+        }
+        if let update::Status::Ready { version, path } = status {
+            let full_screen = self.neighbour.as_ref().is_some_and(|n| n.seen().fullscreen.is_some());
+            if self.update_installable() && !full_screen {
+                eprintln!("update: installing {version} from {}", path.display());
+                self.updater.set(match update::install(&path, &version) {
+                    Ok(()) => update::Status::Installing { version },
+                    Err(e) => update::Status::Failed(e),
+                });
+            }
+        }
+    }
+
+    /// What the panel says of Software Update, and whether it links the releases' page.
+    fn update_text(&self) -> (String, bool) {
+        use update::Status;
+        let current = version::CURRENT;
+        let (text, link) = match self.updater.status() {
+            Status::Idle if self.update_consent.is_none() => (format!("Nagare {current}; not checked yet"), false),
+            Status::Idle => (format!("Nagare {current}"), false),
+            Status::Checking => ("Checking GitHub for a newer version...".to_string(), false),
+            Status::UpToDate { .. } => (format!("Nagare {current} is up to date"), false),
+            Status::Available { version } => (format!("Nagare {version} is out; this copy was not installed by the installer, so get it from"), true),
+            Status::Downloading { version, done, total } => {
+                (format!("Downloading Nagare {version}: {:.0}%", done as f64 / total.max(1) as f64 * 100.0), false)
+            }
+            Status::Ready { version, .. } => (format!("Nagare {version} is downloaded; it installs once nothing is full screen"), false),
+            Status::Installing { version } => (format!("Installing Nagare {version}; Nagare starts again by itself"), false),
+            Status::Stuck { version } => (format!("Nagare {version} did not install last time; Check now tries again, or get it from"), true),
+            Status::Failed(e) => (format!("The update check failed: {e}"), false),
+        };
+        let next = self.update_next - update::unix_now();
+        let when = if self.update_consent == Some(true) && self.update_auto && !self.updater.status().busy() && next > 0.0 {
+            let (h, m) = ((next / 3600.0).floor(), ((next % 3600.0) / 60.0).ceil());
+            if h >= 1.0 { format!(" - next check in {h:.0} h {m:.0} min") } else { format!(" - next check in {m:.0} min") }
+        } else {
+            String::new()
+        };
+        (if link { text } else { text + &when }, link)
+    }
+
     /// Whether the pokes' tip shows: from TIP_AFTER into the XMB's start until dismissed, while pokes open the settings
     /// and nothing else has the screen - the settings, the intro, the epilepsy warning.
     fn tip_showing(&self) -> bool {
         self.poke_tip
+            && !self.consent_showing()
             && self.frame_now - self.xmb_at >= TIP_AFTER
             && self.native_settings.pokes_to_open.round() >= 1.0
             && !self.settings_open()
@@ -2032,7 +2181,7 @@ impl App {
             match (click.right, click.down) {
                 (false, true) => {
                     if let Some((x, y)) = at {
-                        if self.tip_dismissed_by(x, y) {
+                        if self.consent_click(x, y) || self.tip_dismissed_by(x, y) {
                             self.left_taken = true;
                         } else if self.gear.as_ref().is_some_and(|g| g.hit(x, y, scale)) {
                             let near = self.gear.take().and_then(|g| g.screen);
@@ -2130,6 +2279,8 @@ impl App {
         self.panel.held = self.held.clone();
         self.panel.streamer = self.recorder.is_some();
         let auto_cap = self.auto_cap();
+        let (update_status, update_link) = self.update_text();
+        let auto_before = self.update_auto;
         let mut header = panel::Header {
             fps: self.fps,
             wallpaper_available: cfg!(windows),
@@ -2165,6 +2316,9 @@ impl App {
             season: &self.season_text,
             season_month: self.season_month,
             recorder: self.recorder.as_deref().unwrap_or(""),
+            update_auto: &mut self.update_auto,
+            update_status: &update_status,
+            update_link,
         };
         let actions = self.panel.ui(
             ctx,
@@ -2179,6 +2333,14 @@ impl App {
             let parsed = neighbour::parse_processes(text);
             if *list != parsed {
                 *list = parsed;
+            }
+        }
+        // Auto-check ticked or unticked is the answer the card asks for; ticked, the first check is a random 1 to 60
+        // minutes away.
+        if self.update_auto != auto_before {
+            self.update_consent = Some(self.update_auto);
+            if self.update_auto {
+                self.update_next = update::unix_now() + update::random_secs(UPDATE_FIRST.0, UPDATE_FIRST.1);
             }
         }
         actions
@@ -2394,6 +2556,9 @@ impl App {
             self.autostart = autostart::state();
             self.autostart.error = error.unwrap_or_default();
         }
+        if actions.check_update {
+            self.check_for_update(false);
+        }
         if actions.maru_now {
             self.maru_chan.sail_now(now);
         }
@@ -2561,6 +2726,56 @@ impl App {
                             ui.label(egui::RichText::new(text).color(egui::Color32::from_white_alpha((alpha * 230.0) as u8)));
                         });
                 });
+        }
+        // The card asking about Software Update, at the top, in the middle: its buttons' clicks are caught as the
+        // tip's × is, behind the icons too.
+        if self.consent_showing() {
+            let s = f.scale;
+            let ink = |a: u8| egui::Color32::from_white_alpha(a);
+            let rect = |r: egui::Rect| {
+                let r = r.expand(3.0);
+                (r.min.x as f64 * s, r.min.y as f64 * s, r.max.x as f64 * s, r.max.y as f64 * s)
+            };
+            let button = |ui: &mut egui::Ui, text: &str, strong: bool| {
+                egui::Frame::new()
+                    .fill(egui::Color32::from_white_alpha(if strong { 60 } else { 28 }))
+                    .corner_radius(5.0)
+                    .inner_margin(egui::Margin::symmetric(14, 5))
+                    .show(ui, |ui| ui.label(egui::RichText::new(text).size(13.0).color(ink(235))))
+                    .response
+                    .rect
+            };
+            let hits = egui::Area::new(egui::Id::unique("update consent"))
+                .anchor(egui::Align2::CENTER_TOP, egui::vec2(0.0, 24.0))
+                .order(egui::Order::Foreground)
+                .interactable(false)
+                .show(ctx, |ui| {
+                    egui::Frame::new()
+                        .fill(egui::Color32::from_black_alpha(200))
+                        .corner_radius(8.0)
+                        .inner_margin(egui::Margin { left: 14, right: 8, top: 8, bottom: 12 })
+                        .show(ui, |ui| {
+                            ui.set_max_width(430.0);
+                            let close = ui
+                                .horizontal(|ui| {
+                                    ui.label(egui::RichText::new("Software Update").size(14.0).strong().color(ink(240)));
+                                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                                        ui.label(egui::RichText::new("×").size(21.0).color(ink(220))).rect
+                                    })
+                                    .inner
+                                })
+                                .inner;
+                            ui.label(egui::RichText::new(CONSENT_TEXT).size(12.5).color(ink(220)));
+                            ui.add_space(6.0);
+                            let (ok, no) = ui
+                                .horizontal(|ui| (button(ui, "OK", true), button(ui, "No, don't check", false)))
+                                .inner;
+                            vec![(true, rect(ok)), (true, rect(close)), (false, rect(no))]
+                        })
+                        .inner
+                })
+                .inner;
+            self.consent_hits = hits;
         }
         // The pokes' tip, at the top, in the middle, with its ×; the click on the × is caught as the gear's is.
         if self.tip_showing() {
@@ -2803,7 +3018,7 @@ impl App {
         let showing_ae = self.ui_visible || self.settings_window.is_some();
         let ae_state = if ae_on && showing_ae { g.spline.auto_exposure(gl) } else { (None, 0.0) };
         let mut actions = panel::Actions::default();
-        if self.ui_visible || self.gear.is_some() || self.poke_hint(f.now).is_some() || self.warning_look.is_some() || self.intro_showing() || self.tip_showing() {
+        if self.ui_visible || self.gear.is_some() || self.poke_hint(f.now).is_some() || self.warning_look.is_some() || self.intro_showing() || self.tip_showing() || self.consent_showing() {
             gfx.perf.gpu_begin(Pass::Panel);
             let level = &mut gfx.perf.level;
             g.egui.run(&gfx.window, |ui| {
@@ -2941,7 +3156,7 @@ impl App {
         let ae_state = if ae_on && showing_ae { vk.auto_exposure() } else { (None, 0.0) };
         let mut actions = panel::Actions::default();
         let size = [width as u32, height as u32];
-        if self.ui_visible || self.gear.is_some() || self.poke_hint(f.now).is_some() || self.warning_look.is_some() || self.intro_showing() || self.tip_showing() {
+        if self.ui_visible || self.gear.is_some() || self.poke_hint(f.now).is_some() || self.warning_look.is_some() || self.intro_showing() || self.tip_showing() || self.consent_showing() {
             let level = &mut gfx.perf.level;
             vk.egui.run(&gfx.window, |ui| {
                 actions = self.scene_ui(ui.ctx(), level, (&gfx.api, &gfx.renderer, gfx.gear.as_ref()), f, ae_state);
@@ -3066,6 +3281,9 @@ impl App {
         value["introSeen"] = self.intro_seen.into();
         value["fpsAuto"] = self.fps_auto.into();
         value["pokeTipDismissed"] = (!self.poke_tip).into();
+        value["updateConsent"] = self.update_consent.map_or(serde_json::Value::Null, |c| c.into());
+        value["updateAuto"] = self.update_auto.into();
+        value["updateNext"] = self.update_next.round().into();
         value["titleRandom"] = self.panel.title.remembered.into();
         keep_renderer(&mut value, &self.renderer_saved);
         let text = value.to_string();
@@ -3302,6 +3520,7 @@ impl ApplicationHandler for App {
             }
             WindowEvent::CursorLeft { .. } => self.input.left(),
             WindowEvent::MouseInput { state, button: MouseButton::Left, .. } => match state {
+                ElementState::Pressed if !over_ui && self.consent_click(self.cursor.0, self.cursor.1) => {}
                 ElementState::Pressed if !over_ui && self.tip_dismissed_by(self.cursor.0, self.cursor.1) => {}
                 ElementState::Pressed if self.gear.as_ref().is_some_and(|g| g.hit(self.cursor.0, self.cursor.1, scale)) => {
                     self.gear = None;
@@ -3340,6 +3559,7 @@ impl ApplicationHandler for App {
             return;
         }
         self.apply_cpu();
+        self.update_tick();
         if self.gfx.is_some() {
             self.follow_api(event_loop);
         }
@@ -3593,6 +3813,15 @@ fn main() {
             "--no-save" => {
                 options.save = false;
                 true
+            }
+            #[cfg(windows)]
+            "--update-fetch" => {
+                let url = args.next().unwrap_or_default();
+                match update::probe(&url) {
+                    Ok(said) => println!("{said}"),
+                    Err(e) => println!("refused or failed: {e}"),
+                }
+                std::process::exit(0);
             }
             "--no-watchdog" => {
                 options.watchdog = false;

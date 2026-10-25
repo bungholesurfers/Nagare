@@ -95,6 +95,53 @@ is greyed out. It is never asked for unprompted. It writes the user's own `Run` 
 `HKCU\Software\Microsoft\Windows\CurrentVersion\Run`; Task Manager's Startup apps can turn that off, which the panel
 shows as off, and turning it on in the panel turns it back on there too.
 
+## Software Update
+
+Nagare's only use of the network (`update.rs`, Windows only). Nothing is sent until the user agrees: a card on the
+scene, 8 s into the XMB's start, says that Nagare checks GitHub for a newer version every day or two and installs it,
+and that nothing about the user or the PC is sent. Its **OK**, or closing it, turns the checks on, and **No, don't
+check** turns them off. Its buttons are caught as the poke tip's × is, behind the icons too. The panel's top row ends
+with **Software Update:**, an **Auto-check** box (which answers the card's question too) and **Check now**, with a line
+under it saying what the updater did last, and when it next checks. The config keeps `updateConsent`, `updateAuto` and
+`updateNext`.
+
+- **When.** A run's first check comes a random 1 to 60 minutes after the start, but never before the time the last run
+  set. After a check comes a random wait of 24 to 48 hours, or 2 to 6 after a failure.
+- **What.** The tag in the repository's `update/stable.txt`, read from GitHub, names the release to update to
+  ([update/README.md](../update/README.md)). Each release carries `nagare-update.json`: the version, the installer's
+  name, its size and its SHA-256. It is signed with Ed25519 by the release key, the release workflow's secret
+  `NAGARE_UPDATE_KEY`, whose public half is in `signing.rs`. The manifest is believed only if that key signed it, it
+  names the tag's version and an installer named for it, and that version is newer than this one. The installer is
+  kept only if its size and SHA-256 match. A tag naming an older version does nothing, so the unsigned pointer can at
+  worst hold updates back.
+- **How.** HTTPS through rustls (ureq), to GitHub's hosts alone (`github.com`, `raw.githubusercontent.com`, and the
+  storage release downloads redirect to). Every redirect is checked the same way, so nothing ever falls back to plain
+  HTTP, as HSTS ensures in a browser.
+  - Certificates are checked against Mozilla's roots, bundled, not the system's.
+  - Timeouts, and a cap on each body's size.
+  - The certificates are deliberately not pinned. GitHub changes them, and their authorities, without notice, and a
+    pinned updater would then stop updating, including the update that would fix it. The signature is what makes a
+    download trustworthy, whatever happened to the connection.
+  - The requests carry only a User-Agent naming Nagare and its version.
+- **Installing.** The installer is downloaded into `%TEMP%\nagare-update`, as VS Code's per-user setup downloads its own
+  into `%TEMP%`. A copy the installer installed then runs it silently, once nothing is full screen; the installer
+  stops Nagare, installs over it and starts it again. A copy that was not installed (a build, or the portable zip)
+  only says that a version is out, and links the releases' page.
+- **Loop guard.** Before an installer runs, `tried.txt` beside it names its version. A Nagare still older than that
+  afterwards knows the install did not take, and Auto-check leaves that version alone (Check now can still try it).
+  Once Nagare is that version, the folder is cleared away; the uninstaller removes it too.
+
+To test it without publishing anything:
+- `NAGARE_UPDATE_SOURCE=FOLDER` reads `stable.txt`, the manifest, its signature and the installer from a folder.
+- `NAGARE_UPDATE_NOW=1` checks 5 s after the start, as if the card had been answered OK (with `--no-save`, nothing of it
+  is kept). Neither variable is passed on to the installer.
+- `--update-fetch URL` fetches a URL exactly as the updater does, and says what came.
+- `cargo test --release -- --ignored tls` checks that the client refuses expired, wrong-name, self-signed and
+  unknown-authority certificates (it goes to the network).
+
+`nagare-release` (`src/bin/release.rs`) is the release workflow's side: `keygen` makes a key, and `manifest` writes and
+signs a release's manifest, checking that the app knows the key.
+
 ## Wallpaper mode: the mouse and the settings
 
 Behind the icons the scene never gets the mouse's messages: the desktop's icons window (`SHELLDLL_DefView`) takes

@@ -147,6 +147,8 @@ pub struct Actions {
     /// the intro's card played now (Scene's First start).
     pub benchmark: Option<bool>,
     pub intro_now: bool,
+    /// Software Update's Check now.
+    pub check_update: bool,
     /// Where the panel's window lies, in points, for the blur under it.
     pub window: Option<egui::Rect>,
 }
@@ -162,6 +164,7 @@ impl Actions {
         self.disco_now |= other.disco_now;
         self.benchmark = self.benchmark.or(other.benchmark);
         self.intro_now |= other.intro_now;
+        self.check_update |= other.check_update;
     }
 }
 
@@ -223,6 +226,11 @@ pub struct Header<'a> {
     pub season_month: Option<u32>,
     /// The screen recorder's program that puts the panel in streamer mode, if one runs.
     pub recorder: &'a str,
+    /// Software Update: whether it checks by itself, what it is doing, and whether that names the releases' page,
+    /// for a copy that cannot install an update itself.
+    pub update_auto: &'a mut bool,
+    pub update_status: &'a str,
+    pub update_link: bool,
 }
 
 /// What the header's own buttons ask for.
@@ -461,7 +469,27 @@ impl Panel {
                         actions.wallpaper = true;
                     }
                     ui.label(RichText::new(format!("{fps:.0} fps")).weak());
+                    // Software Update, at the row's right end.
+                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                        if ui.button("Check now").on_hover_text("Check GitHub for a newer version now, and install it if there is one").clicked() {
+                            actions.check_update = true;
+                        }
+                        ui.checkbox(&mut *header.update_auto, "Auto-check").on_hover_text(
+                            "Check GitHub for a newer version every day or two (the first check a while after Nagare starts), and install it by itself.\nNothing about you or your PC is sent: only the request.",
+                        );
+                        ui.label("Software Update:");
+                    });
                 });
+                if !header.update_status.is_empty() {
+                    ui.horizontal(|ui| {
+                        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                            if header.update_link {
+                                ui.hyperlink_to(RichText::new("the releases' page").small(), crate::update::RELEASES_PAGE);
+                            }
+                            ui.label(RichText::new(header.update_status).weak().small());
+                        });
+                    });
+                }
                 ui.separator();
                 let exposure = wave.exposure;
                 if !self.streamer {

@@ -63,6 +63,10 @@ was done.
   its frame cap. Then come the photosensitivity warning and a card you may recognise from 2009 (albeit slightly political).
 - **An installer** for your user account only, with no administrator needed, and a watchdog that restarts Nagare if it
   crashes. A customizer designs the logo and the installer's look.
+- **Updates itself, if you say so.** Nagare first asks before it checks GitHub for a newer version. Then, every day or
+  two, it fetches the new installer, checks that it carries the release key's signature, and installs it quietly. It
+  sends nothing about you or your PC. It's the only thing Nagare uses the network for, and you can turn it off in the
+  settings at any time.
 
 Everything is set from one settings panel, with a tooltip on every setting. The details, including every option and
 how each part works, are in [native/README.md](native/README.md).
@@ -125,6 +129,9 @@ To build a release, use `.\pgo.ps1` (profile-guided optimisation, about 20 minut
   filled into its download links.
   - The PGO training draws the scene, so it needs a real GPU. Record the profile on a PC with `.\pgo.ps1 -Save` and
     commit `native/pgo/`.
+  - The release also gets Software Update's signed manifest, `nagare-update.json`, which needs the repository secret
+    `NAGARE_UPDATE_KEY`. Copies of Nagare move to a release only once its tag is in
+    [`update/stable.txt`](update/README.md).
 
 ## Not affiliated with Sony
 

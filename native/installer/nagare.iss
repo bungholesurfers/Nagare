@@ -65,6 +65,10 @@ Root: HKCU; Subkey: "Software\Microsoft\Windows\CurrentVersion\Run"; ValueType: 
 ; The app's name and picture for its notifications, which the app writes as it first shows one (tray.rs).
 Root: HKCU; Subkey: "Software\Classes\AppUserModelId\Nagare"; Flags: uninsdeletekey dontcreatekey
 
+[UninstallDelete]
+; What Software Update downloads (update.rs): the last installer it fetched, and its log.
+Type: filesandordirs; Name: "{%TEMP}\nagare-update"
+
 [Run]
 Filename: "{app}\nagare.exe"; Description: "Start Nagare now"; Flags: nowait postinstall skipifsilent
 
