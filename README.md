@@ -1,163 +1,136 @@
-# PlayStation 3 XMB Waves Recreation
+# Nagare
 
-> Fork of [linkev/PlayStation-3-XMB](https://github.com/linkev/PlayStation-3-XMB). Issues opened here are about this fork; the original project keeps its own.
+**The PlayStation 3's flowing XMB waves, as a live wallpaper for your Windows desktop.**
 
-**Click the image for a demo!**
-[![Demo of PlayStation 3 XMB Waves Recreation](demo.png)](https://faquino.github.io/PlayStation-3-XMB/)
+![Nagare: the wave at night, with maru-chan sailing it](native/installer/theme/scene-wide.png)
 
-The keyboard and mouse controls, the settings and the URL parameters are in [How to Use](#how-to-use-ps3xmbwave).
+Nagare (流れ, "a flow") draws the PS3 menu's wave, its sparkles and its backdrop behind your desktop icons, live, at
+the console's own pace, and it gives way to your games and apps when they need the PC. It is written in Rust, and draws
+with Vulkan or OpenGL.
 
+> **This repository's own work is in [`native/`](native/).** That is Nagare: the Rust app, its installer and its
+> tooling. Everything else in the repository is the research Nagare is built on, kept here as it came from the two
+> projects below, and it stays the reference: the Rust port follows it, constant for constant.
 
-## About the Project
+## Standing on the shoulders of
 
-WebGL-based recreation of the PlayStation 3 XrossMediaBar (XMB) background wave system (the wave, the sparkles around it and the backdrop behind).
+Nagare is a port, and the hard part was done before it existed.
 
-This repo used to be mostly "looks close enough, ship it" shader guesswork (still archived in `old-research`). The active implementation, in `ps3xmbwave`, is now a port of the console's own code, read out of PS3 firmware 4.93 running in RPCS3: for the wave, the simulation of its lines that `custom_render_plugin` runs on the PPU, the deformation lattice the GPU works out and the B-spline surface `spline.elf` builds on an SPU; for the sparkles, `particles.elf`'s SPU task and the plugin's emitter; and for the backdrop and the passes after the wave, the XMB's own programs. Each piece is checked against what the console recorded while it ran - savestates and frame captures.
+- **[faquino/PlayStation-3-XMB](https://github.com/faquino/PlayStation-3-XMB)**, by Fran, reverse-engineered the scene
+  from PS3 firmware 4.93 running in [RPCS3](https://rpcs3.net/). That covers:
+  - the wave's line simulation, deformation lattice and B-spline surface (`custom_render_plugin`, `spline.elf`);
+  - the sparkles' SPU task and emitter (`particles.elf`);
+  - the backdrop's programs and the passes after the wave.
 
-What is still modelled rather than read out of the firmware is marked as such, both in the code and in the reverse-engineering notes.
+  Each was checked against savestates and frame captures, and written up in the reverse-engineering notes. The
+  WebGL2 page in [`ps3xmbwave/`](ps3xmbwave/) is that work, and Nagare's wave, particles, backdrop and post-processing
+  are ported from it, file for file.
+- **[linkev/PlayStation-3-XMB](https://github.com/linkev/PlayStation-3-XMB)**, by Mart, started it all: the original
+  WebGL recreation, which faquino's fork grew from. It is kept in [`old-research/`](old-research/), along with its
+  credit to [Alphardex's CodePen](https://codepen.io/alphardex/pen/poPZNwE).
 
-The project was started by Mart in [linkev/PlayStation-3-XMB](https://github.com/linkev/PlayStation-3-XMB). This fork took it from there with the goal of achieving a visually faithful reproduction of the scene appearing in the XMB background, using RPCS3 as a reverse-engineering tool.
+Their README is kept as [README.upstream.md](README.upstream.md). It covers the web version, the research, and how it
+was done.
 
+## What Nagare adds
 
-## Credits
+- **A real desktop wallpaper.** It draws behind the desktop icons, reads the mouse off the desktop so the sparkles
+  still react to it, and has a tray icon (the Norb). Ctrl+Alt+Shift+W toggles it. To open the settings, poke the
+  desktop: click it 9 times in quick succession.
+- **The scene, ported faithfully.** It uses the same wave, sparkles, backdrop, tone curve and glare as the research,
+  with the console's own parameter sets through the day, the XMB's start and the music theme.
+- **Three renderers.**
+  - **Vulkan** (the default, through wgpu) builds the wave on the GPU, in compute passes.
+  - **OpenGL 3.3** is the original renderer.
+  - **Software** (WARP) is a fallback that leaves the heavy features out.
 
-While this is inspired by the official PlayStation 3 XMB background wave design, Mart's first version started from this [CodePen by Alphardex](https://codepen.io/alphardex/pen/poPZNwE), which was subsequently refined and optimized. That code lives on in `old-research` and the current implementation in `ps3xmbwave` no longer derives from it.
+  If one fails, the next takes over.
+- **Manners.** Nagare limits, pauses or fully stops itself when a game goes full screen, a window is maximized, a
+  listed program runs, the PC is on battery, or the GPU's memory runs short. A stop frees the GPU's memory entirely.
+  Its threads can be kept on efficiency cores, under EcoQoS.
+- **Enhancements, all optional.** Bloom, tonemappers, auto exposure, an ALEXA-style film grain, FXAA, supersampling,
+  sharpening and motion blur. With them off, you get the console's look.
+- **Music mode.** When your PC plays music, the scene switches to the console's music theme, and then it really gets
+  going ([try it](#try-it-with-music)).
+- **Maru-chan.** A little glass steamboat sails the wave now and then.
+- **Season Pass.** A tour of every month's backdrop colours, in order or shuffled.
+- **A first start with ceremony.** On a PC it hasn't seen before, Nagare runs a short benchmark, which is how it picks
+  its frame cap. Then come the photosensitivity warning and a card you may recognise from 2009 (albeit slightly political).
+- **An installer** for your user account only, with no administrator needed, and a watchdog that restarts Nagare if it
+  crashes. A customizer designs the logo and the installer's look.
 
+Everything is set from one settings panel, with a tooltip on every setting. The details, including every option and
+how each part works, are in [native/README.md](native/README.md).
 
-## Current Features (new implementation in `ps3xmbwave`)
+## Getting it
 
-- **Reverse-engineered wave**: `wave-reverse.js` builds the wave the way the console does - the PPU's simulation of 19 lines, the GPU's deformation lattice and the SPU's B-spline surface - into the console's own 128 × 128 mesh, and `spline.js` draws it with the XMB's line programs re-authored in GLSL. The firmware's parameter sets move it as they move the particles: through the day, the XMB's start, a game's launch and the music. The scene's fade - Theme Settings' Brightness, or another module taking the screen - dims it with the backdrop and the sparkles, as the console's does.
-- **WebGL2 renderer**: Pure WebGL2 rendering path (backdrop + wave mesh + the passes after it + particles), no framework dependency.
-- **The console's backdrop**: the default, `Auto (date and time)`, runs the XMB's own backdrop program, re-authored, over fits of its month textures: this month's and next month's colours taken through hue, saturation and value, lit by clocks that run through the day with two glows going round, next month wiped in up the screen as the month goes on, and the night's textures mixed in by the hour. Under the music it switches, as the console does, to the console's other program. The 12 month gradients with day/night variants, and an "Original (RGB Sliders)" mode, remain as presets.
-- **Live control panel**: one settings panel, in tabs - Scene, Input, Backdrop, Wave, Post, Particles - with a slider, a select, a pair of radio buttons or, for the sparkles' colours, a palette of swatches per setting, named after the firmware's own parameters. Tooltips indicate what each setting does and where it comes from; a reset per row, a lock that keeps a value from the theme, and colours that tell who set each value - by hand, the theme, a boot sequence or the music.
-- **Reverse-engineered particle system**: `particles-reverse.js` is a JavaScript port of the SPU update task in the PS3's `particles.elf` and of the PPU side that feeds it - the emitter, the flow grid and the controller's response - drawn in the two passes the XMB uses, re-authored in GLSL. The firmware's own parameter sets come with it: the day cycle runs by the clock, and the controller stand-in (arrow keys, mouse drag) stirs the field the way the real one does. The mouse pointer, which the console doesn't have, pushes the sparkles it passes over the way a moving XMB icon does.
-- **Reverse engineering notes included**: [SPLINE_REVERSE_ENGINEER.md](SPLINE_REVERSE_ENGINEER.md), [WAVE_REVERSE_ENGINEER.md](WAVE_REVERSE_ENGINEER.md) (an index into [`docs/wave/`](docs/wave/)), [PARTICLES_REVERSE_ENGINEER.md](PARTICLES_REVERSE_ENGINEER.md) (an index into [`docs/particles/`](docs/particles/)) and [BACKGROUND_REVERSE_ENGINEER.md](BACKGROUND_REVERSE_ENGINEER.md) (an index into [`docs/background/`](docs/background/)) document traced functions, memory ranges, and what is still modelled, each one saying which is which.
+Download the installer from the **Releases** page and run it. Nagare installs into
+`%LOCALAPPDATA%\Programs\Nagare`, can start when you sign in, and uninstalls cleanly from Settings > Apps. A portable
+zip of the two exes is there too.
 
+Until the releases are code-signed, SmartScreen will warn about the download: choose *More info > Run anyway*.
 
-## Reality Check and What Still Needs Work
+Windows 10 or 11 is required, with a GPU that runs Vulkan or OpenGL 3.3 (or neither, with the software renderer).
+The code also compiles for Linux and macOS, where Nagare would run as a window, but that is little tried. The
+wallpaper, tray and installer are Windows only.
 
-- There are no firmware assets or code in this repository, so the page generates approximate fits of the textures it needs: the backdrop's month textures, the sparkles' iridescent colours and the table used to light the wave's edges where it turns away from view (`_FresLUT`). The shader programs that draw the backdrop, on the other hand, have been rewritten faithfully, checked against the console's to float precision: the default one (which runs over those month fits) and the one used while music plays (which needs no texture at all).
-- Sparkles run the console's own update task, fed by the PPU side as traced - the emitter, the flow grid's rule, the controller - and a headless bench (`tools/bench/particles.js`) compares their pool with one read out of a savestate and what they draw with two frame captures, each at its own moment. What is left is the XMB's side: how its icons move, which writes the flow grid, and when it sends a step.
-- The wave's geometry is the console's own now, checked piece by piece against savestates, and so are the passes the console runs after it - the composite with the backdrop, the tone curve and the glare: fed the console's own mesh, the page draws RPCS3's screenshot of the moment. What differs is the very first minutes after a start: the console starts its lines from a state baked into its firmware, so the page makes one the same way, which keeps the console's pace but not its exact course.
-- The glare follows RPCS3, which runs the CLAMP its textures are set to as clamp-to-edge. On a real RSX, CLAMP may instead blend the edge with a border colour, as the GPUs it descends from did, which would dim the glare along the screen's edges; only real hardware can tell.
+## Try it with music
 
+Once Nagare is running, play some music, from any player or browser tab. Then turn it up, preferably something with
+a lot of bass.
 
-## How It Was Reverse Engineered
+- **The theme changes.** Nagare notices the music and eases the scene into the console's music theme, its dank purple
+  and all, as the PS3 did when you played music on it.
+- **It moves with the music.** It listens to what your PC plays, and the wave brightens with how loud the music has
+  been, with extra weight on the bass.
+- **It bounces to the beat.** The camera bounces on every beat it finds. The bass line itself flickers the light and
+  shakes the view at its own pitch, and the kicks give it a bop. Every move is motion-blurred, so it stays smooth
+  rather than jittery.
+- **The disco ball (albeit scuffed, disabled by default).** Turn on `discoBall` in the settings, keep the heavy bass
+  going for a few minutes, and a disco ball comes down near the top right. Its beams sweep through the haze, and its
+  glints flash with the beat.
 
-Everything `ps3xmbwave` ports comes from PS3 firmware 4.93 running in RPCS3: the PPU and SPU code of its modules, read and traced, and checked against what RPCS3 recorded while the XMB ran - savestates, which hold the console's memory, and RSX frame captures, which hold every draw of a frame with its uniforms. The tools written in Python that do it are in [`tools/re`](tools/re/README.md): they read your own firmware and write what they extract into `re-work/`, which git ignores. No firmware files are in this repo: only values read out of it, such as the `.mnu` parameters, and data fitted to it, such as the backdrop's month textures in `background-months.js`.
+When the music stops, it all winds down and the scene drifts back to the clock's colours. Prefer your own colours
+under the music? Pick *Normal color* for `musicColourChoice` in the settings.
 
-Two headless benches compare the page with the console's own figures, recorded inside them, and need no firmware:
+## Building
+
+You need [Rust](https://rustup.rs/). [`native/rust-toolchain.toml`](native/rust-toolchain.toml) pins the compiler,
+and rustup installs it on first use.
 
 ```bash
-node tools/bench/wave.js --seconds 10 --every 2
-node tools/bench/particles.js --seconds 30 --runs 3 --seed 1
+cd native
+cargo run --release                 # behind the desktop icons, with a tray icon
+cargo run --release -- --window     # in a window, with the settings panel
 ```
 
+To build a release, use `.\pgo.ps1` (profile-guided optimisation, about 20 minutes) and then `.\installer.ps1 -NoBuild`
+([Inno Setup 6](https://jrsoftware.org/isinfo.php)). [native/README.md](native/README.md#build-and-pgo) explains both.
 
-## Local Development
+### GitHub workflows
 
-1. Clone the repository:
-```bash
-git clone https://github.com/faquino/PlayStation-3-XMB.git
-cd PlayStation-3-XMB
-```
+- **[Native CI](.github/workflows/native-ci.yml)** runs on every push that touches `native/`. It runs clippy for
+  Windows, Linux and macOS and the tests, then builds the app, and keeps the exes as the run's artifact.
+- **[Native release](.github/workflows/native-release.yml)** runs on a `v*` tag. It builds with PGO from the profile
+  kept in `native/pgo/`, packages the installer, signs everything once signing is set up, and drafts a GitHub
+  release.
+  - The PGO training draws the scene, so it needs a real GPU. Record the profile on a PC with `.\pgo.ps1 -Save` and
+    commit `native/pgo/`.
 
-2. Install dependencies:
-```bash
-npm install
-```
+## Not affiliated with Sony
 
-3. Start the development server:
-```bash
-npm run start
-```
+Nagare is an unofficial, non-commercial fan project. It is not affiliated with, endorsed by or sponsored by Sony
+Interactive Entertainment.
 
-4. Open in browser:
-- Main current implementation: `http://localhost:8000/ps3xmbwave/`
-- Old implementation archive: `http://localhost:8000/old-research/`
-- DDS gradient utility: `http://localhost:8000/dds/`
+- "PlayStation", "PS3" and "XMB" are trademarks of Sony Interactive Entertainment Inc., used here only to say what
+  Nagare recreates.
+- No Sony firmware, code, shaders or assets are in this repository or in Nagare. The shaders are written anew, and
+  the textures the scene needs are generated or fitted. The reverse-engineering tools in `tools/re/` only read
+  firmware you already have.
 
+## License
 
-## Explanation of the Files and Folders
+[MIT](LICENSE), as the projects it comes from. Copyright © 2025 Mart, © 2026 Fran, and Nagare's contributors.
 
-- `ps3xmbwave`: Current active implementation (reverse-engineering-based wave, particles, backdrop and settings UI), published as the demo site.
-- `old-research`: Previous implementation and experiments (guesswork/prototyping era), kept for history and references.
-- `dds`: "Poor man's gradient extraction" tool. Loads PS3 `.dds` files, solves best-fit 2D linear gradients (angle + colors), previews reconstruction, and exports JS preset code.
-- `WAVE_REVERSE_ENGINEER.md`, `PARTICLES_REVERSE_ENGINEER.md`, `BACKGROUND_REVERSE_ENGINEER.md`: the indexes of the reverse-engineering notes - what each file of `ps3xmbwave` ports as verified, what it models, and what is still missing.
-- `docs`: the notes themselves, one topic per file under `wave`, `particles` and `background`.
-- `SPLINE_REVERSE_ENGINEER.md`: upstream's reverse-engineering notes from a Ghidra pass on `spline.elf`, kept as they were written; the wave notes say what they confirm or overturn.
-- `tools/re`: the reverse-engineering tools, which read your own firmware - see [How it was reverse engineered](#how-it-was-reverse-engineered).
-- `tools/bench`: the headless benches that compare the page with the console.
-- `.github/workflows/pages.yml`: publishes `ps3xmbwave` to GitHub Pages on every push to `main` that changes it.
-- `CLAUDE.md`: guidance for Claude Code working in the repository - its architecture, conventions and how the notes are kept.
-- `demo.png`: Preview image used in this README.
-
-
-## How to Use (`ps3xmbwave`)
-
-Every setting's name has a tooltip that says what it does and where it comes from.
-
-1. **The Settings panel (top-right)**:
-   - Its settings are laid out in tabs, and within each in titled sections. Most are the firmware's own parameters, under their own names.
-   - Each tab counts the values changed in it by hand, and the header counts them all, beside the ones the theme, a boot sequence or the music set, in their own colours. A value changed by hand can be locked against the theme, and `Reset` takes it back.
-
-2. **Its tabs**:
-   - `Scene`: `Theme` picks the parameter set the whole scene runs on - `Auto (time of day)` blends dawn, day, dusk and night with the clock, and the others hold one of the firmware's sets - and `Sequence` plays one of the XMB's boot sequences over it: `XMB start`, `Game launch` or `Other launch`. The page opens with `XMB start`, as the console does. Then the console's state the scene is drawn under: music playback, Theme Settings' Brightness and Colour, the video output, and the background given away to another module.
-   - `Input`: what the arrow keys and the mouse do to the sparkles, and how the controller stirs them, with `PARTICLES_UI.mnu`'s parameters.
-   - `Backdrop`: `BACKGROUND.mnu`'s backdrop programs and its tint. The backdrop is always the console's own, by the date and the time of day.
-   - `Wave`: `LINE1.mnu`'s parameters - the lines' springs and noise, the wave's placement, its deformation and shading - and its tint.
-   - `Post`: `HDR.mnu`'s passes after the wave: the tone curve and the glare.
-   - `Particles`: `PARTICLES.mnu`'s parameters - emission, life, motion, lighting, size and focus, glare.
-
-3. **Interacting with the scene**:
-
-   | Input | What it does |
-   |---|---|
-   | ← → | Step the XMB's focus sideways, as the D-pad does on the console: held, they turn the sparkles across the screen and stir them up. |
-   | ↑ ↓ | Turn the sparkles up or down the same way. On the console these only scroll the icons; `Vertical Steps` switches back to that. |
-   | A horizontal and a vertical arrow together | Turn the sparkles diagonally. |
-   | Moving the mouse | Pushes the sparkles the pointer passes over, as a moving XMB would; `Pointer Wind` sets how hard, and 0 turns it off. |
-   | Dragging with the mouse | Tilts and shakes a virtual Sixaxis: shaking it stirs the sparkles up, as shaking the controller does on the console. |
-
-4. **UI visibility**:
-   - The panel's `Hide` button leaves a `Show Settings` button in its place.
-   - `H` hides or shows the panel, and the notice at the bottom.
-
-5. **Page/URL parameters**:
-   - `?ui=off` at the end of the address starts the page without the panel and the notice, for the scene alone - in a frame or as a wallpaper: [faquino.github.io/PlayStation-3-XMB/?ui=off](https://faquino.github.io/PlayStation-3-XMB/?ui=off). `H` brings them back.
-
-
-## Technical Details (subject to change anytime)
-
-### WebGL Implementation (`ps3xmbwave`)
-- **Rendering path**: WebGL2 only; without `EXT_color_buffer_float` the glare is left out.
-- **Layering**: the backdrop into a 64 × 32 buffer, the wave's light into one of its own, the console's composite, tone curve and glare over both, then the additive particles.
-- **Backdrop source**: the console's backdrop programs, `back_colours0` (the months') and `back_colours1` (the music's), drawn into that buffer and eased in from a copy of it.
-- **Wave source**: the console's 128 × 128 mesh, built on the CPU each frame by `wave-reverse.js` and uploaded as a vertex buffer.
-- **Particle source**: the port of `particles.elf`'s SPU task, stepped on the CPU at a fixed 60 Hz (at most four steps a frame), drawn as instanced quads in the XMB's two passes.
-
-### Reverse-Engineered Wave Status
-- **What is implemented**: the lines' simulation, the deformation lattice, the free-form deformation, the camera and the B-spline surface, with the line programs' shading, the passes that follow the wave, and the firmware's `LINE1.mnu`, `HDR.mnu` and `BACKGROUND.mnu` sets - see [WAVE_REVERSE_ENGINEER.md](WAVE_REVERSE_ENGINEER.md) and [BACKGROUND_REVERSE_ENGINEER.md](BACKGROUND_REVERSE_ENGINEER.md).
-- **What stays apart**: the very first minutes after a start stay as the page makes them, since matching the console's would take its baked start itself; and even from that start a run drifts from the console's in its detail, as the lines magnify the boot's frame pacing and the emulator's arithmetic - see [WAVE_REVERSE_ENGINEER.md](WAVE_REVERSE_ENGINEER.md#still-missing).
-
-
-## License and Disclaimer
-
-This is an unofficial, non-commercial fan project. Open sourced and available under the [MIT License](LICENSE). The license covers this repository's own code and notes; it grants nothing over Sony's trademarks, firmware or assets.
-
-It's not affiliated with, endorsed by or sponsored by Sony Interactive Entertainment. "PlayStation", "PS3" and "XMB" are trademarks or registered trademarks of Sony Interactive Entertainment Inc., used here only to name what the project recreates.
-
-No Sony firmware, code, shaders or assets are distributed here. The renderer and its shaders are written anew in GLSL, not copied; the few textures the page needs are generated at start-up or approximated by fitted curves; and the tools in `tools/re/` only read firmware the user already has, writing into `re-work/`, which `.gitignore` keeps out of the repository.
-
-
-## Acknowledgments and Thanks
-
-- Mart, for starting the project this fork comes from.
-- Everyone involved in the PS3 XMB and its background animation both at Sony and Q-Games. I think it is the best video game console interface design ever, and I love it.
-- [Alphardex](https://codepen.io/alphardex/pen/poPZNwE) for the original code that served as the starting point for the project from which this one is derived.
-- The [RPCS3](https://rpcs3.net/) team. This reverse engineering was made possible by RPCS3's savestates, frame captures and shader decompiler.
-
-
-## Support
-
-Found a bug or something that looks different from the console? [Open an issue on GitHub!](https://github.com/faquino/PlayStation-3-XMB/issues)
+Thanks to the RPCS3 team, whose emulator made the reverse engineering possible, and to everyone at Sony and Q-Games
+who made the XMB. It is still the best console interface there is.
