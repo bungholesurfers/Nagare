@@ -127,7 +127,11 @@ jobs:
         if: github.ref_type == 'tag'
         env:
           GH_TOKEN: ${{ github.token }}
+        # The body is .github/release-notes.md, its placeholders filled in - the download links up top - with GitHub's
+        # generated list of changes after it.
         run: |
           $v = '${{ steps.version.outputs.value }}'
-          $signed = if ($env:SIGN -eq 'true') { 'signed' } else { 'not code-signed yet' }
-          gh release create $env:GITHUB_REF_NAME (Get-ChildItem target\out).FullName --draft --title "Nagare $v" --generate-notes --notes "Built with PGO; $signed."
+          $signed = if ($env:SIGN -eq 'true') { 'Code-signed through the SignPath Foundation.' } else { 'Not code-signed yet: SmartScreen may warn about the download. Choose More info > Run anyway.' }
+          $notes = (Get-Content ..\.github\release-notes.md -Raw).Replace('{{REPO}}', $env:GITHUB_REPOSITORY).Replace('{{TAG}}', $env:GITHUB_REF_NAME).Replace('{{VERSION}}', $v).Replace('{{SIGNED}}', $signed)
+          $notes | Set-Content target\release-notes.md -Encoding utf8
+          gh release create $env:GITHUB_REF_NAME (Get-ChildItem target\out).FullName --draft --title "Nagare $v" --notes-file target\release-notes.md --generate-notes

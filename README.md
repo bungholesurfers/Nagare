@@ -8,6 +8,11 @@ Nagare (流れ, "a flow") draws the PS3 menu's wave, its sparkles and its backdr
 the console's own pace, and it gives way to your games and apps when they need the PC. It is written in Rust, and draws
 with Vulkan or OpenGL.
 
+### ⬇️ [Download Nagare for Windows](https://github.com/bungholesurfers/Nagare/releases/latest)
+
+The latest release has the installer and a portable zip, both for 64-bit Windows (x64). More in
+[Getting it](#getting-it).
+
 > **This repository's own work is in [`native/`](native/).** That is Nagare: the Rust app, its installer and its
 > tooling. Everything else in the repository is the research Nagare is built on, kept here as it came from the two
 > projects below, and it stays the reference: the Rust port follows it, constant for constant.
@@ -64,9 +69,12 @@ how each part works, are in [native/README.md](native/README.md).
 
 ## Getting it
 
-Download the installer from the **Releases** page and run it. Nagare installs into
-`%LOCALAPPDATA%\Programs\Nagare`, can start when you sign in, and uninstalls cleanly from Settings > Apps. A portable
-zip of the two exes is there too.
+Open the [latest release](https://github.com/bungholesurfers/Nagare/releases/latest). Its first two links are the
+downloads:
+
+- **Windows installer (x64)**, the easy way. Nagare installs into `%LOCALAPPDATA%\Programs\Nagare`, can start when you
+  sign in, and uninstalls cleanly from Settings > Apps.
+- **Portable zip (x64)**: the two exes, to unzip anywhere and run, with no Start menu entry and no start at sign-in.
 
 Until the releases are code-signed, SmartScreen will warn about the download: choose *More info > Run anyway*.
 
@@ -113,7 +121,8 @@ To build a release, use `.\pgo.ps1` (profile-guided optimisation, about 20 minut
   Windows, Linux and macOS and the tests, then builds the app, and keeps the exes as the run's artifact.
 - **[Native release](.github/workflows/native-release.yml)** runs on a `v*` tag. It builds with PGO from the profile
   kept in `native/pgo/`, packages the installer, signs everything once signing is set up, and drafts a GitHub
-  release.
+  release. The release's body comes from [`.github/release-notes.md`](.github/release-notes.md), with the version
+  filled into its download links.
   - The PGO training draws the scene, so it needs a real GPU. Record the profile on a PC with `.\pgo.ps1 -Save` and
     commit `native/pgo/`.
 
