@@ -1,0 +1,66 @@
+{
+  "text": "N",
+  "font": "arial.ttf",
+  "letter_size": 0.6,
+  "letter_x": 0.5,
+  "letter_y": 0.38,
+  "letter_top": [
+    0.0,
+    0.46339655,
+    1.0
+  ],
+  "letter_bottom": [
+    1.0,
+    1.0,
+    1.0
+  ],
+  "gloss": 1.0,
+  "outline_width": 0.001,
+  "outline_color": [
+    0.003935939,
+    0.03310476,
+    0.13286833
+  ],
+  "shadow_color": [
+    0.09377117,
+    0.14215674,
+    0.3033773
+  ],
+  "shadow_opacity": 0.53,
+  "shadow_blur": 0.068,
+  "shadow_dx": 0.0,
+  "shadow_dy": 0.075,
+  "shadow_intensity": 1.4,
+  "sphere": true,
+  "sphere_y": 1.0,
+  "sphere_radius": 0.5,
+  "sphere_color": [
+    0.43255207,
+    0.49966314,
+    0.6100093
+  ],
+  "light_azimuth": 140.0,
+  "light_elevation": 41.0,
+  "ambient": 0.68,
+  "diffuse": 1.2,
+  "specular": 0.0,
+  "shininess": 180.0,
+  "specular_color": [
+    1.0,
+    1.0,
+    1.0
+  ],
+  "rim": 1.75,
+  "rim_color": [
+    0.21404111,
+    0.69207096,
+    1.0
+  ],
+  "plate": false,
+  "plate_color": [
+    0.004896309,
+    0.0071944054,
+    0.013411746
+  ],
+  "plate_radius": 0.0
+}

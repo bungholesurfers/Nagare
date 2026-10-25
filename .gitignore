@@ -75,3 +75,9 @@ __pycache__/
 # Reverse-engineering workspace: firmware files and dumps extracted by tools/re/.
 # Firmware assets must never be committed.
 re-work/
+
+# Rust build output of the native port
+native/target/
+
+# Raw PGO training output; only the merged native/pgo/nagare.profdata is kept.
+*.profraw

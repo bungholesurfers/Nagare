@@ -1,0 +1,88 @@
+{
+  "left": {
+    "picture": "Text",
+    "text": "★PKG",
+    "font": "YuGothM.ttc#1",
+    "image": "",
+    "size": 0.95,
+    "x": 0.5,
+    "y": 0.5,
+    "colour": [
+      1.0,
+      1.0,
+      1.0
+    ],
+    "glow": 1.0,
+    "glow_colour": [
+      0.17064494,
+      0.46619684,
+      1.0
+    ],
+    "opacity": 1.0
+  },
+  "right": {
+    "picture": "Logo",
+    "text": "PKG",
+    "font": "segoeuib.ttf",
+    "image": "",
+    "size": 0.97,
+    "x": 0.5,
+    "y": 0.5,
+    "colour": [
+      1.0,
+      1.0,
+      1.0
+    ],
+    "glow": 0.6,
+    "glow_colour": [
+      0.17064494,
+      0.6038274,
+      1.0
+    ],
+    "opacity": 1.0
+  },
+  "turn": 42.0,
+  "tilt": 21.0,
+  "height": 0.92,
+  "size": 0.84,
+  "y": 0.42,
+  "glass_top": [
+    0.063723795,
+    0.3185467,
+    0.95510465
+  ],
+  "glass_bottom": [
+    0.0015479847,
+    0.010022854,
+    0.11928018
+  ],
+  "opacity": 0.67,
+  "light_top": 1.35,
+  "light_left": 0.95,
+  "light_right": 0.62,
+  "edge_width": 0.007,
+  "edge_colour": [
+    0.6218182,
+    0.7978448,
+    1.0
+  ],
+  "edge_opacity": 1.0,
+  "edge_glow": 0.42,
+  "back_edges": 0.42,
+  "gloss": 0.06,
+  "gloss_width": 0.5,
+  "tape": 0.67,
+  "tape_width": 0.22,
+  "tape_colour": [
+    0.5225216,
+    0.7874125,
+    1.0
+  ],
+  "shadow_colour": [
+    0.15823874,
+    0.32731938,
+    0.8880745
+  ],
+  "shadow_opacity": 0.1,
+  "shadow_blur": 0.042
+}

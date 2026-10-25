@@ -1,0 +1,81 @@
+[package]
+name = "nagare"
+version = "0.1.0"
+edition = "2021"
+description = "Native port of the PS3 XMB wave and particles recreation, with a Windows desktop-wallpaper mode"
+license = "MIT"
+default-run = "nagare"
+autobins = false
+
+[[bin]]
+name = "nagare"
+path = "src/main.rs"
+
+# Starts Nagare again should it crash; Nagare starts it (src/watchdog.rs).
+[[bin]]
+name = "nagare-watchdog"
+path = "src/bin/watchdog.rs"
+
+# The customizer: designs and renders the app's icons (assets/logo, which the app takes in at compile time), the
+# installer's icon and pictures (installer/theme), and builds the installer.
+[[bin]]
+name = "nagare-customize"
+path = "src/bin/customize/main.rs"
+
+[dependencies]
+glow = "0.17"
+glutin = "0.32"
+glutin-winit = "0.5"
+winit = "0.30"
+raw-window-handle = "0.6"
+# The bundled emoji fonts, as egui had them by default before 0.37: the tabs' and the overlay's symbols.
+egui = { version = "0.37", features = ["monochrome_emoji_fonts"] }
+egui_glow = { version = "0.37", features = ["winit"] }
+egui-winit = "0.37"
+chrono = { version = "0.4", default-features = false, features = ["clock", "std"] }
+serde_json = "1"
+png = "0.18"
+wgpu = { version = "30", features = ["glsl"] }
+egui-wgpu = { version = "0.37", features = ["winit"] }
+pollster = "0.4"
+eframe = { version = "0.37", default-features = false, features = ["default_fonts", "glow", "wayland", "x11"] }
+ab_glyph = "0.2"
+# The faces in a font collection (.ttc) and their names, for the customizer's font lists: the parser ab_glyph uses.
+ttf-parser = "0.25"
+serde = { version = "1", features = ["derive"] }
+
+[target.'cfg(unix)'.dependencies]
+libc = "0.2"
+
+[target.'cfg(windows)'.dependencies]
+tray-icon = "0.26"
+windows-sys = { version = "0.59", features = [
+  "Win32_Foundation",
+  "Win32_Graphics_Gdi",
+  "Win32_UI_WindowsAndMessaging",
+  "Win32_UI_Shell",
+  "Win32_UI_Input",
+  "Win32_UI_Input_KeyboardAndMouse",
+  "Win32_System_Threading",
+  "Win32_System_LibraryLoader",
+  "Win32_System_Power",
+  "Win32_System_RemoteDesktop",
+  "Win32_System_SystemServices",
+  "Win32_System_SystemInformation",
+  "Win32_System_Diagnostics_ToolHelp",
+  "Win32_System_Kernel",
+  "Win32_System_Performance",
+  "Win32_Graphics_Dwm",
+  "Win32_UI_Controls",
+  "Win32_System_Registry",
+] }
+windows = { version = "0.62.2", features = ["Media_Control", "Foundation", "Foundation_Collections", "Win32_System_WinRT", "Win32_Graphics_Dxgi", "Win32_Media_Audio", "Win32_System_Com", "Win32_System_Com_StructuredStorage", "Win32_System_Variant", "UI_Notifications", "Data_Xml_Dom"] }
+
+[profile.dev]
+opt-level = 1
+
+# Thin LTO over 16 units: a change rebuilds in about 30 s rather than 110, for a few percent of the CPU's frame time.
+# pgo.ps1 builds a release with fat LTO and one unit, the last few percent.
+[profile.release]
+lto = "thin"
+codegen-units = 16
