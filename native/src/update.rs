@@ -107,8 +107,10 @@ impl Updater {
 
     /// Checks for a newer version on a thread of its own, of the lowest priority, unless one already works; with
     /// `install`, a newer version's installer is then downloaded and checked, for `main.rs` to run - unless it is
-    /// `automatic` and that version's installer already ran without taking (`tried`).
-    pub fn start(&self, install: bool, automatic: bool) {
+    /// `automatic` and that version's installer already ran without taking (`tried`). `force` (the panel's Reinstall)
+    /// takes the stable version whatever this one is - the same, or even newer - still only as its signed manifest
+    /// describes it.
+    pub fn start(&self, install: bool, automatic: bool, force: bool) {
         if self.status().busy() {
             return;
         }
@@ -121,7 +123,7 @@ impl Updater {
                     *lock = s;
                 }
             };
-            set(match run(install, automatic, &set) {
+            set(match run(install, automatic, force, &set) {
                 Ok(s) => s,
                 Err(e) => Status::Failed(e),
             });
@@ -134,13 +136,13 @@ impl Updater {
 
 /// The check, and with `install` the download.
 #[cfg(windows)]
-fn run(install: bool, automatic: bool, set: &dyn Fn(Status)) -> Result<Status, String> {
+fn run(install: bool, automatic: bool, force: bool, set: &dyn Fn(Status)) -> Result<Status, String> {
     let source = Source::new();
     let tag = String::from_utf8(source.fetch(STABLE_URL, MAX_TAG)?).map_err(|_| "the stable tag is not text")?;
     let tag = tag.trim();
     let stable = version::parse(tag).ok_or(format!("the stable tag {tag:?} is not a version"))?;
     let stable = format!("{}.{}.{}", stable.0, stable.1, stable.2);
-    if !version::newer(&stable, version::CURRENT) {
+    if !force && !version::newer(&stable, version::CURRENT) {
         return Ok(Status::UpToDate { stable });
     }
     // Only the tag's own characters go into the URLs: v, digits and dots, which parse() has checked.
@@ -166,7 +168,7 @@ fn run(install: bool, automatic: bool, set: &dyn Fn(Status)) -> Result<Status, S
 }
 
 #[cfg(not(windows))]
-fn run(_install: bool, _automatic: bool, _set: &dyn Fn(Status)) -> Result<Status, String> {
+fn run(_install: bool, _automatic: bool, _force: bool, _set: &dyn Fn(Status)) -> Result<Status, String> {
     Err("updates are checked on Windows only".into())
 }
 

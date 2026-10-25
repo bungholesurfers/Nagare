@@ -80,7 +80,8 @@ downloads:
   sign in, and uninstalls cleanly from Settings > Apps.
 - **Portable zip (x64)**: the two exes, to unzip anywhere and run, with no Start menu entry and no start at sign-in.
 
-Until the releases are code-signed, SmartScreen will warn about the download: choose *More info > Run anyway*.
+Until the releases are code-signed, SmartScreen will warn about the download: choose *More info > Run anyway*. See
+the [privacy policy](#privacy-policy) for what Nagare sends over the network.
 
 Windows 10 or 11 is required, with a GPU that runs Vulkan or OpenGL 3.3 (or neither, with the software renderer).
 The code also compiles for Linux and macOS, where Nagare would run as a window, but that is little tried. The
@@ -136,7 +137,7 @@ explains each task.
 - **[Native CI](.github/workflows/native-ci.yml)** runs on every push that touches `native/`. It runs clippy for
   Windows, Linux and macOS and the tests, then builds the app, and keeps the exes as the run's artifact.
 - **[Native release](.github/workflows/native-release.yml)** runs on a `v*` tag. It builds with PGO from the profile
-  kept in `native/pgo/`, packages the installer, signs everything once signing is set up, and drafts a GitHub
+  kept in `native/pgo/`, packages the installer, and drafts a GitHub
   release. The release's body comes from [`.github/release-notes.md`](.github/release-notes.md), with the version
   filled into its download links.
   - The PGO training draws the scene, so it needs a real GPU. Record the profile on a PC with `cargo xtask pgo` and
@@ -144,6 +145,21 @@ explains each task.
   - The release also gets Software Update's signed manifest, `nagare-update.json`, which needs the repository secret
     `NAGARE_UPDATE_KEY`. Copies of Nagare move to a release only once its tag is in
     [`update/stable.txt`](update/README.md).
+
+## Privacy policy
+
+Nagare will not transfer any information to other networked systems unless you ask it to. Its one use of the network
+is **Software Update**:
+
+- Nagare asks first, on its first start. Until you answer OK (or close the question), nothing is sent.
+- When on, every day or two it fetches a small text file and, when a newer version is out, that version's signed
+  update files from GitHub, over HTTPS. The requests carry nothing about you or your PC, beyond what any download
+  shows: GitHub sees your IP address, as described in the
+  [GitHub privacy statement](https://docs.github.com/site-policy/privacy-policies/github-general-privacy-statement).
+- You can turn it off at any time in the settings, under *Software Update: Auto-check*.
+
+Everything else Nagare does stays on your PC: listening to the music you play (to move the scene), reading which
+media app is playing, watching for full-screen programs, and its settings file.
 
 ## Not affiliated with Sony
 

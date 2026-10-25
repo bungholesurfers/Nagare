@@ -670,6 +670,8 @@ struct App {
     update_next: f64,
     update_scheduled: bool,
     update_tidied: bool,
+    /// NAGARE_UPDATE_NOW=force: the run's first check is a forced one, as the panel's Reinstall makes.
+    update_force_first: bool,
     consent_hits: Vec<(bool, (f64, f64, f64, f64))>,
     intro_seen: bool,
     /// The first start's word on the tray icon, NORB_SEC after the XMB's start that follows the card: whether it is
@@ -853,10 +855,11 @@ impl App {
         let poke_tip = !saved.as_ref().and_then(|v| v["pokeTipDismissed"].as_bool()).unwrap_or(false) && options.test.is_none();
         config_saved["pokeTipDismissed"] = (!poke_tip && options.test.is_none()).into();
         // Software Update: asked about once; on unless the answer was no; the first check of a run a random 1 to 60
-        // minutes in, and never before the one the last run set (NAGARE_UPDATE_NOW=1: 5 s in, asked or not, to try it).
+        // minutes in, and never before the one the last run set (NAGARE_UPDATE_NOW=1: 5 s in, asked or not, to try it;
+        // =force: the same, forced, as Reinstall).
         let update_consent = saved.as_ref().and_then(|v| v["updateConsent"].as_bool());
         let update_auto = saved.as_ref().and_then(|v| v["updateAuto"].as_bool()).unwrap_or(update_consent != Some(false));
-        let update_now = std::env::var("NAGARE_UPDATE_NOW").is_ok_and(|v| v == "1");
+        let update_now = std::env::var("NAGARE_UPDATE_NOW").is_ok_and(|v| v == "1" || v == "force");
         let update_next = if update_now {
             update::unix_now() + 5.0
         } else {
@@ -970,6 +973,7 @@ impl App {
             update_next,
             update_scheduled: true,
             update_tidied: false,
+            update_force_first: std::env::var("NAGARE_UPDATE_NOW").is_ok_and(|v| v == "force"),
             consent_hits: Vec::new(),
             refresh_hz: None,
             drivers_checked: 0.0,
@@ -1076,11 +1080,12 @@ impl App {
     }
 
     /// Starts a check now, if none is under way: `automatic` for Auto-check's, which leaves alone a version whose
-    /// installer ran before without taking; Check now tries it again.
-    fn check_for_update(&mut self, automatic: bool) {
+    /// installer ran before without taking; Check now tries it again. `force` is Reinstall's: the stable version is
+    /// downloaded and installed even when this copy already is it, or newer.
+    fn check_for_update(&mut self, automatic: bool, force: bool) {
         if !self.updater.status().busy() {
             self.update_scheduled = false;
-            self.updater.start(self.update_installable(), automatic);
+            self.updater.start(self.update_installable(), automatic, force);
         }
     }
 
@@ -1100,7 +1105,8 @@ impl App {
         }
         let waiting = matches!(status, update::Status::Ready { .. });
         if self.update_consent == Some(true) && self.update_auto && now >= self.update_next && !status.busy() && !waiting {
-            self.check_for_update(true);
+            let force = std::mem::take(&mut self.update_force_first);
+            self.check_for_update(!force, force);
         }
         // A minute in, what a finished update left behind goes (the installer that started this Nagare is done by then).
         if !self.update_tidied && self.frame_now > 60.0 {
@@ -2557,7 +2563,10 @@ impl App {
             self.autostart.error = error.unwrap_or_default();
         }
         if actions.check_update {
-            self.check_for_update(false);
+            self.check_for_update(false, false);
+        }
+        if actions.reinstall_update {
+            self.check_for_update(false, true);
         }
         if actions.maru_now {
             self.maru_chan.sail_now(now);

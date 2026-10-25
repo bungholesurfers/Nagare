@@ -101,9 +101,14 @@ Nagare's only use of the network (`update.rs`, Windows only). Nothing is sent un
 scene, 8 s into the XMB's start, says that Nagare checks GitHub for a newer version every day or two and installs it,
 and that nothing about the user or the PC is sent. Its **OK**, or closing it, turns the checks on, and **No, don't
 check** turns them off. Its buttons are caught as the poke tip's × is, behind the icons too. The panel's top row ends
-with **Software Update:**, an **Auto-check** box (which answers the card's question too) and **Check now**, with a line
-under it saying what the updater did last, and when it next checks. The config keeps `updateConsent`, `updateAuto` and
-`updateNext`.
+with **Software Update:**, an **Auto-check** box (which answers the card's question too), **Check now** and
+**Reinstall**, with a line under it saying what the updater did last, and when it next checks. The config keeps
+`updateConsent`, `updateAuto` and `updateNext`.
+
+**Reinstall** forces a download and install of the stable version whatever this copy is: the same version, to repair
+an install, or even a newer one, to go back to the stable release. It goes through the same checks as any update (the
+release key's signature, the installer's size and SHA-256), and, like them, installs only on a copy the installer
+installed.
 
 - **When.** A run's first check comes a random 1 to 60 minutes after the start, but never before the time the last run
   set. After a check comes a random wait of 24 to 48 hours, or 2 to 6 after a failure.
@@ -134,7 +139,8 @@ under it saying what the updater did last, and when it next checks. The config k
 To test it without publishing anything:
 - `NAGARE_UPDATE_SOURCE=FOLDER` reads `stable.txt`, the manifest, its signature and the installer from a folder.
 - `NAGARE_UPDATE_NOW=1` checks 5 s after the start, as if the card had been answered OK (with `--no-save`, nothing of it
-  is kept). Neither variable is passed on to the installer.
+  is kept); `NAGARE_UPDATE_NOW=force` makes that check a forced one, as Reinstall does. Neither variable is passed on
+  to the installer.
 - `--update-fetch URL` fetches a URL exactly as the updater does, and says what came.
 - `cargo test --release -- --ignored tls` checks that the client refuses expired, wrong-name, self-signed and
   unknown-authority certificates (it goes to the network).

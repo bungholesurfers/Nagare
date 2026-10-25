@@ -14,3 +14,4 @@ The easy way. Installs Nagare for your user alone (no administrator needed), can
 - **{{SIGNED}}**
 - Built with profile-guided optimisation. The SHA-256 checksums of both files are in `SHA256SUMS.txt` below.
 - New to Nagare? Poke the desktop 9 times to open the settings, then try playing some music.
+- [Privacy policy](https://github.com/{{REPO}}#privacy-policy): Nagare's only use of the network is Software Update, which asks first.

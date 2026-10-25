@@ -147,8 +147,9 @@ pub struct Actions {
     /// the intro's card played now (Scene's First start).
     pub benchmark: Option<bool>,
     pub intro_now: bool,
-    /// Software Update's Check now.
+    /// Software Update's Check now, and its Reinstall, which installs the stable version whatever this one is.
     pub check_update: bool,
+    pub reinstall_update: bool,
     /// Where the panel's window lies, in points, for the blur under it.
     pub window: Option<egui::Rect>,
 }
@@ -165,6 +166,7 @@ impl Actions {
         self.benchmark = self.benchmark.or(other.benchmark);
         self.intro_now |= other.intro_now;
         self.check_update |= other.check_update;
+        self.reinstall_update |= other.reinstall_update;
     }
 }
 
@@ -471,6 +473,13 @@ impl Panel {
                     ui.label(RichText::new(format!("{fps:.0} fps")).weak());
                     // Software Update, at the row's right end.
                     ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                        if ui
+                            .button("Reinstall")
+                            .on_hover_text("Download the stable version from GitHub and install it now, even if this copy already is that version (or newer): a repair, or a way back to the stable one.\nIt is checked as any update is: only the release key's signed files install. Only a copy the installer installed can do it.")
+                            .clicked()
+                        {
+                            actions.reinstall_update = true;
+                        }
                         if ui.button("Check now").on_hover_text("Check GitHub for a newer version now, and install it if there is one").clicked() {
                             actions.check_update = true;
                         }
