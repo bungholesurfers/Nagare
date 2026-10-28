@@ -36,6 +36,12 @@ use crate::steamboat::Steamboat;
 /// The overlay's width from level 2, and the labels' column in its tables of readouts.
 const WIDTH: f32 = 560.0;
 const KEY_WIDTH: f32 = 84.0;
+/// The sizes the overlay is drawn at, to fit a frame too short for it; the space it keeps from the frame's edges, in
+/// points; how much room a larger size must leave before it is taken back, and for how long.
+const ZOOMS: [f32; 6] = [1.0, 0.92, 0.84, 0.76, 0.68, 0.6];
+const EDGE: f32 = 12.0;
+const ROOMY: f32 = 1.06;
+const ROOMY_SECONDS: f32 = 1.0;
 
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub enum Stage {
@@ -200,6 +206,8 @@ pub struct Info {
     pub width: i32,
     pub height: i32,
     pub pacing: String,
+    /// The system's timer resolution, and how long the frame wait spins.
+    pub timer: String,
     pub wave_steps: u64,
     pub particle_steps: u64,
     pub particles: usize,
@@ -294,6 +302,13 @@ pub struct Perf {
     /// Whether the steamboat shows, at whatever level: the panel's maru-time.
     pub maru: bool,
     boat: RefCell<Steamboat>,
+    /// The overlay's size, a step of ZOOMS: taken smaller at once when it does not fit the frame's height, and back up
+    /// only once the larger step has had room to spare for a second, so that an overlay at the edge, whose height moves
+    /// a line or two, does not flick between two sizes. Its height as last laid out, in points at full size; since
+    /// when the larger step has had room.
+    zoom: usize,
+    tall: f32,
+    roomy_since: Option<Instant>,
     /// What --report gathers: every frame's CPU stages, every GPU result as it comes in, and the process's CPU time and
     /// the wall clock when gathering began.
     recording: Option<Recording>,
@@ -374,6 +389,9 @@ impl Perf {
             ctx,
             maru: false,
             boat: RefCell::new(Steamboat::default()),
+            zoom: 0,
+            tall: 0.0,
+            roomy_since: None,
             recording: None,
         }
     }
@@ -555,26 +573,46 @@ impl Perf {
         if self.maru {
             self.boat.get_mut().update(info.audio.as_ref());
         }
+        // The frame's height in points at full size, and the size the overlay fits it at.
+        let room = size[1] as f32 / pixels_per_point;
+        let fits = |zoom: f32, spare: f32| (self.tall + 2.0 * EDGE) * zoom * spare <= room;
+        if self.tall > 0.0 {
+            while self.zoom + 1 < ZOOMS.len() && !fits(ZOOMS[self.zoom], 1.0) {
+                self.zoom += 1;
+                self.roomy_since = None;
+            }
+            if self.zoom > 0 && fits(ZOOMS[self.zoom - 1], ROOMY) {
+                let since = *self.roomy_since.get_or_insert_with(Instant::now);
+                if since.elapsed().as_secs_f32() >= ROOMY_SECONDS {
+                    self.zoom -= 1;
+                    self.roomy_since = None;
+                }
+            } else {
+                self.roomy_since = None;
+            }
+        }
+        let ppp = pixels_per_point * ZOOMS[self.zoom];
         let mut raw = egui::RawInput {
-            screen_rect: Some(egui::Rect::from_min_size(
-                egui::Pos2::ZERO,
-                egui::vec2(size[0] as f32, size[1] as f32) / pixels_per_point,
-            )),
+            screen_rect: Some(egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(size[0] as f32, size[1] as f32) / ppp)),
             ..Default::default()
         };
-        raw.viewports.entry(egui::ViewportId::ROOT).or_default().native_pixels_per_point = Some(pixels_per_point);
+        raw.viewports.entry(egui::ViewportId::ROOT).or_default().native_pixels_per_point = Some(ppp);
         let ctx = self.ctx.clone();
-        let output = ctx.run_pass(raw, |ctx| self.ui(ctx, info));
+        let mut tall = 0.0;
+        let output = ctx.run_pass(raw, |ctx| tall = self.ui(ctx, info));
+        self.tall = tall;
         let primitives = ctx.tessellate(output.shapes, output.pixels_per_point);
         Some(Overlay { primitives, textures: output.textures_delta, pixels_per_point: output.pixels_per_point })
     }
 
-    fn ui(&self, ctx: &egui::Context, info: &Info) {
+    /// Lays the overlay out, returning its height, in points.
+    fn ui(&self, ctx: &egui::Context, info: &Info) -> f32 {
         let (anchor, offset) =
-            if info.right { (egui::Align2::RIGHT_TOP, [-12.0, 12.0]) } else { (egui::Align2::LEFT_TOP, [12.0, 12.0]) };
+            if info.right { (egui::Align2::RIGHT_TOP, [-EDGE, EDGE]) } else { (egui::Align2::LEFT_TOP, [EDGE, EDGE]) };
         let s = &self.shown;
         egui::Area::new(egui::Id::unique("perf"))
             .anchor(anchor, offset)
+            .constrain(false)
             .interactable(false)
             .show(ctx, |ui| {
                 egui::Frame::new()
@@ -609,7 +647,10 @@ impl Perf {
                             self.readouts(ui, info);
                         }
                     });
-            });
+            })
+            .response
+            .rect
+            .height()
     }
 
     /// The frame's spread, its pacing and arguments, and the stages' and passes' timings.
@@ -618,6 +659,7 @@ impl Perf {
         let dim = Color32::from_gray(170);
         ui.label(RichText::new(format!("frame min {:.2} · max {:.2} ms, last 0.5 s", s.min, s.max)).color(dim));
         ui.label(RichText::new(format!("pacing  {}", info.pacing)).color(dim));
+        ui.label(RichText::new(format!("timer   {}", info.timer)).color(dim));
         let args = if info.args.is_empty() { "(none)" } else { &info.args };
         ui.label(RichText::new(format!("args    {args}")).color(dim));
         ui.add_space(4.0);

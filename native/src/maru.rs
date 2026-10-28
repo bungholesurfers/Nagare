@@ -6,7 +6,7 @@
 //! into slabs with rounded rims: the hull (its cream stripe, its porthole), the cabin, the funnel and its band, the mast
 //! and its pennant - and always turned to face the eye, so that the scene stays 2.5D. Its face is the 2D one, on the
 //! cabin's front: round eyes with their glint, shut as a curve when it blinks and squinting > < at a kick, cheeks, and
-//! a mouth open in song when the music is loud.
+//! a mouth open in song with heavy bass, the wider the lower the bass (`mouth`).
 //!
 //! Its body is frosted glass, as the XMB's icons are: what lies behind it - the wave and the particles - seen through
 //! it bent by its surface, a little blurred, its colours split at the edges (chromatic aberration), and tinted by the
@@ -14,8 +14,8 @@
 //! the porthole, the mast and the pennant are painted on, opaque.
 //!
 //! Where it floats is read off the wave each frame, from the very vertices the particles are emitted from: where the
-//! wave's lines cross the boat's place across the screen, its height is the highest of them and its distance the
-//! middle of their band, both eased, with a slow bob. Its size is set in pixels on the screen. The bass moves it up and
+//! wave's lines cross the boat's place across the screen, its height is the highest of them - or, by maruRideDepth, that
+//! share of the way down to the lowest - and its distance the middle of their band, both eased, with a slow bob. Its size is set in pixels on the screen. The bass moves it up and
 //! down at subShake's rate. Its smoke is soft sprites, the faster and the more the louder the bass, and when heavy bass
 //! comes in all at once it blasts out a burst.
 //!
@@ -266,14 +266,35 @@ pub fn tile(bounds: [f32; 4], width: i32, height: i32) -> Option<([i32; 4], [f32
 pub struct Heard {
     pub listening: bool,
     pub kicks: u64,
-    /// How loud it has been (the response's activity), the bass's level (0 without a pitch) and subShake's rate.
-    pub loud: f32,
+    /// The bass's level (0 without a pitch) and pitch (0 without one), and subShake's rate.
     pub bass: f32,
+    pub bass_hz: f32,
     pub shake_hz: f32,
     /// The beat: where this moment falls between two (0 on a beat, rising to 1), and how sure it is.
     pub beat_phase: f32,
     pub beat_sure: f32,
 }
+
+/// The bass's level, 0 to 1, over which the boat sings; the pitches at which its mouth opens widest and least.
+const MOUTH_BASS: f32 = 0.5;
+const MOUTH_LOW_HZ: f32 = 45.0;
+const MOUTH_HIGH_HZ: f32 = 100.0;
+
+/// How far the boat's mouth opens, 0 shut to 1 wide, for the bass heard - both boats', the scene's and the overlay's:
+/// `level`, its level from 0 to 1 (0 with no pitch heard), and `hz`, its pitch. It sings only with heavy bass, over
+/// MOUTH_BASS, opening the wider the further over and the lower the bass: MOUTH_LOW_HZ and under widest, MOUTH_HIGH_HZ
+/// and over a third of that.
+pub fn mouth(level: f32, hz: f32) -> f32 {
+    let over = ((level - MOUTH_BASS) / (1.0 - MOUTH_BASS)).clamp(0.0, 1.0);
+    if over <= 0.0 || hz <= 0.0 {
+        return 0.0;
+    }
+    let low = ((MOUTH_HIGH_HZ - hz) / (MOUTH_HIGH_HZ - MOUTH_LOW_HZ)).clamp(0.0, 1.0);
+    over.sqrt() * (0.35 + 0.65 * low)
+}
+
+/// How far a mouth eased to `open` shows open: shut below this.
+pub const MOUTH_SHUT: f32 = 0.06;
 
 type P3 = [f32; 3];
 
@@ -515,8 +536,10 @@ struct Puff {
 }
 
 enum Voyage {
-    /// Off, or waiting until `at` (seconds of the app's clock) to sail.
-    Waiting { at: Option<f64> },
+    /// Off, or waiting since `since` (seconds of the app's clock) to sail: for its first voyage - since it was switched
+    /// on, or the music began - or for the next, since the last ended. How long it waits is the settings' when it comes
+    /// due, the music's or not, so that a change to them never touches a voyage under way.
+    Waiting { since: Option<f64>, first: bool },
     Sailing { since: f64 },
 }
 
@@ -524,6 +547,8 @@ pub struct Maru {
     model: Model,
     voyage: Voyage,
     was_on: bool,
+    /// Whether the music held the scene last frame: its coming and going starts the wait again.
+    was_music: bool,
     /// Where it floats, eased: the wave's top under it and its distance, in the world.
     height: Option<f32>,
     depth: f32,
@@ -544,6 +569,8 @@ pub struct Maru {
     bass_slow: f32,
     surge: f32,
     steam: f32,
+    /// How far its mouth is open (`mouth`), eased.
+    mouth: f32,
     puffs: Vec<Puff>,
     rng: u32,
     /// The frame's triangles, `FLOATS` a corner: the boat's first, `boat` corners of them, then the smoke's; and the
@@ -562,8 +589,9 @@ impl Default for Maru {
     fn default() -> Self {
         Maru {
             model: model(),
-            voyage: Voyage::Waiting { at: None },
+            voyage: Voyage::Waiting { since: None, first: true },
             was_on: false,
+            was_music: false,
             height: None,
             depth: 0.0,
             shake_phase: 0.0,
@@ -577,6 +605,7 @@ impl Default for Maru {
             tilt: (0.0, 0.0),
             bass_slow: 0.0,
             surge: 0.0,
+            mouth: 0.0,
             steam: 0.0,
             puffs: Vec::new(),
             rng: 0x2545_f491,
@@ -639,9 +668,10 @@ impl Maru {
         self.float = None;
     }
 
-    /// Takes it off the screen now, its smoke too, its next voyage due `next` (none: when it is switched on).
-    pub fn dock(&mut self, next: Option<f64>) {
-        self.voyage = Voyage::Waiting { at: next };
+    /// Takes it off the screen now, its smoke too, waiting from `since` for a first voyage (none: until it is switched
+    /// on).
+    pub fn dock(&mut self, since: Option<f64>) {
+        self.voyage = Voyage::Waiting { since, first: true };
         self.puffs.clear();
     }
 
@@ -651,15 +681,31 @@ impl Maru {
         let on = s.maru_chan != 0.0;
         let minutes = |m: f64| m.max(0.0) * 60.0;
         // The schedule: its first voyage a while after it is switched on (or the app starts with it on), then one
-        // every so often, each after the last has gone; with music only, the next waits for the music.
+        // every so often, each after the last has gone - under the music, its first a while after the music begins and
+        // then its own every so often; when the music ends, the next a while after. With music only, none without it.
+        // Only a wait is ever changed: a voyage under way sails on.
         if on != self.was_on {
             self.was_on = on;
-            if let Voyage::Waiting { at } = &mut self.voyage {
-                *at = on.then(|| f.now + minutes(s.maru_first_min));
+            if let Voyage::Waiting { since, first } = &mut self.voyage {
+                *since = on.then_some(f.now);
+                *first = true;
             }
         }
-        if let Voyage::Waiting { at: Some(at) } = self.voyage {
-            if f.now >= at && (s.maru_music_only == 0.0 || f.music) {
+        if f.music != self.was_music {
+            self.was_music = f.music;
+            if let Voyage::Waiting { since: since @ Some(_), first } = &mut self.voyage {
+                *since = Some(f.now);
+                *first = f.music;
+            }
+        }
+        if let Voyage::Waiting { since: Some(since), first } = self.voyage {
+            let wait = match (f.music, first) {
+                (true, true) => s.maru_music_first_min,
+                (true, false) => s.maru_music_every_min,
+                (false, true) => s.maru_first_min,
+                (false, false) => s.maru_every_min,
+            };
+            if f.now >= since + minutes(wait) && (s.maru_music_only == 0.0 || f.music) {
                 self.voyage = Voyage::Sailing { since: f.now };
                 self.height = None;
                 self.float = None;
@@ -675,7 +721,7 @@ impl Maru {
         if let Voyage::Sailing { since } = self.voyage {
             let p = (f.now - since) / (s.maru_cross_sec.max(1.0) * (span / (2.0 + 2.0 * margin)) as f64);
             if p >= 1.0 {
-                self.voyage = Voyage::Waiting { at: on.then(|| f.now + minutes(s.maru_every_min)) };
+                self.voyage = Voyage::Waiting { since: on.then_some(f.now), first: false };
             } else {
                 progress = Some(p as f32);
             }
@@ -687,6 +733,10 @@ impl Maru {
             progress = Some(0.0);
         }
         let dt = f.dt.clamp(0.0, 0.1) as f32;
+        // The mouth opens quickly and shuts a little slower, so that it sings rather than flickers.
+        let open = if f.heard.listening { mouth(f.heard.bass, f.heard.bass_hz) } else { 0.0 };
+        let rate = if open > self.mouth { 18.0 } else { 9.0 };
+        self.mouth += (open - self.mouth) * (1.0 - (-dt * rate).exp());
         // The light map takes in the frame at most LIGHT_HZ times a second, the time between carried over, so that it
         // eases alike at any frame rate - an uncapped benchmark's too.
         self.light_dt += dt;
@@ -729,7 +779,8 @@ impl Maru {
         if let Some(progress) = progress {
             // Its place across the screen, from beyond the left edge to beyond the right.
             let across = held.map_or(-1.0 - margin + span * progress, |x| 2.0 * x - 1.0);
-            if let Some((top, depth)) = Self::read_wave(wave, across, p00, p11) {
+            let ride = s.maru_ride_depth.clamp(0.0, 1.0) as f32;
+            if let Some((top, depth)) = Self::read_wave(wave, across, p00, p11, ride) {
                 self.top = top;
                 let ease = |v: f32, to: f32, rate: f32| v + (to - v) * (1.0 - (-dt * rate).exp());
                 match self.height {
@@ -777,7 +828,7 @@ impl Maru {
             let gain = s.maru_tilt.max(0.0) as f32;
             let tilt = if gain > 0.0 {
                 let d = (size_px / f.width as f32 * 0.8).max(1e-4);
-                let target = match (Self::read_wave(wave, across - d, p00, p11), Self::read_wave(wave, across + d, p00, p11)) {
+                let target = match (Self::read_wave(wave, across - d, p00, p11, ride), Self::read_wave(wave, across + d, p00, p11, ride)) {
                     (Some((behind, _)), Some((ahead, _))) => ((ahead - behind) / (2.0 * d * distance / p00)).atan() * gain,
                     _ => self.tilt.0,
                 }
@@ -863,8 +914,8 @@ impl Maru {
                 ellipsoid(&mut face, sphere, [cheek[0], cheek[1], z - 0.002], [1.9 / 56.0, 1.9 / 56.0, 0.004], PINK);
             }
             let mouth = u2(-1.0, -12.5);
-            if f.heard.listening && f.heard.loud > 0.45 {
-                let r = (1.2 + 1.4 * f.heard.loud) / 56.0;
+            if self.mouth > MOUTH_SHUT {
+                let r = (0.9 + 2.2 * self.mouth) / 56.0;
                 ellipsoid(&mut face, sphere, [mouth[0], mouth[1], z], [r, r, 0.006], MOUTH);
             } else {
                 stroke(&mut face, at(mouth, -1.8, -0.4), at(mouth, 0.0, 0.8), z, line * 0.9, INK);
@@ -1010,10 +1061,11 @@ impl Maru {
     }
 
     /// The wave where the boat is across the screen (`across`, -1 to 1): where its lines cross that place, the
-    /// highest of them and the middle of their band's distance, in the world; None if none crosses it.
-    fn read_wave(wave: &mut Wave, across: f32, p00: f32, p11: f32) -> Option<(f32, f32)> {
+    /// highest of them - or `ride` of the way down from it to the lowest - and the middle of their band's distance, in
+    /// the world; None if none crosses it.
+    fn read_wave(wave: &mut Wave, across: f32, p00: f32, p11: f32, ride: f32) -> Option<(f32, f32)> {
         let world = |v: [f32; 4]| -> P3 { [v[0] / p00, v[1] / p11, CAMERA.eye[2] as f32 - v[3]] };
-        let (mut top, mut near, mut far, mut found) = (f32::MIN, f32::MIN, f32::MAX, false);
+        let (mut top, mut low, mut near, mut far, mut found) = (f32::MIN, f32::MAX, f32::MIN, f32::MAX, false);
         // Each line read coarsely along, then the step it crosses there narrowed down by halves: a dozen vertices a
         // line rather than all of them.
         let across_of = |v: [f32; 4]| if v[3] > 1e-4 { Some(v[0] / v[3]) } else { None };
@@ -1045,11 +1097,12 @@ impl Maru {
             let k = if (x - lx).abs() > 1e-6 { ((across - lx) / (x - lx)).clamp(0.0, 1.0) } else { 0.0 };
             let p = world(std::array::from_fn(|i| lv[i] + (v[i] - lv[i]) * k));
             top = top.max(p[1]);
+            low = low.min(p[1]);
             near = near.max(p[2]);
             far = far.min(p[2]);
             found = true;
         }
-        found.then_some((top, 0.5 * (near + far)))
+        found.then_some((top + (low - top) * ride, 0.5 * (near + far)))
     }
 }
 
@@ -1254,5 +1307,22 @@ impl MaruGl {
             gl.bind_texture(glow::TEXTURE_2D, None);
             gl.active_texture(glow::TEXTURE0);
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn sings_with_heavy_low_bass() {
+        // Quiet bass, or none heard: shut.
+        assert_eq!(mouth(0.3, 50.0), 0.0);
+        assert_eq!(mouth(1.0, 0.0), 0.0);
+        // Heavy bass: open, the lower the wider.
+        assert!((mouth(1.0, 45.0) - 1.0).abs() < 1e-6);
+        assert!((mouth(1.0, 100.0) - 0.35).abs() < 1e-6);
+        assert!(mouth(0.9, 50.0) > mouth(0.9, 80.0));
+        assert!(mouth(0.9, 60.0) > mouth(0.6, 60.0));
     }
 }

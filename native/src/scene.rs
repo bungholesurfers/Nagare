@@ -900,13 +900,21 @@ pub struct Season {
     pub fade: Option<f64>,
 }
 
+/// The shortest a Season Pass month holds, in minutes, and its fade, in seconds: seasonPassHoldMin's and
+/// seasonPassFadeSec's minimums, which a config of before them may go below.
+const SEASON_HOLD_MIN: f64 = 3.0;
+const SEASON_FADE_MIN: f64 = 30.0;
+
 /// Season Pass - the app's own: the backdrop's tour of the months, in place of the clock's month. Each of the months
 /// seasonPassMonths picks shows for seasonPassHoldMin, then the next - in the calendar's order, or shuffled - fades in
-/// over seasonPassFadeSec, the backdrop easing from the old month's colours as it eases from any moment.
+/// over seasonPassFadeSec, the backdrop easing from the old month's colours as it eases from any moment. It begins on
+/// seasonPassStart's month.
 #[derive(Default)]
 pub struct SeasonPass {
     /// The month shown, since when, and the one to come after it - chosen ahead, so that the panel can name it.
     month: Option<(u32, f64, u32)>,
+    /// seasonPassStart as the tour last began under it: a change begins it again.
+    start: u32,
     rng: u64,
 }
 
@@ -918,7 +926,8 @@ pub struct SeasonStatus {
 }
 
 impl SeasonPass {
-    /// The month for `now`, or None while the tour is off; it begins on the clock's month, or the first picked after it.
+    /// The month for `now`, or None while the tour is off; it begins on seasonPassStart's month (0 the clock's), or the
+    /// first picked after it.
     pub fn month(&mut self, n: &crate::settings::NativeSettings, now: f64, at: NaiveDateTime) -> Option<Season> {
         let mode = n.season_pass.round() as u8;
         let mask = (n.season_pass_months.round().clamp(0.0, 4095.0) as u32).max(1);
@@ -926,21 +935,27 @@ impl SeasonPass {
             self.month = None;
             return None;
         }
+        let start = n.season_pass_start.round().clamp(0.0, 12.0) as u32;
+        if start != self.start {
+            self.start = start;
+            self.month = None;
+        }
         let picked = |m: u32| mask & (1 << (m - 1)) != 0;
         let Some((month, since, next)) = self.month.filter(|(m, _, _)| picked(*m)) else {
-            let first = if picked(at.month()) { at.month() } else { following(mask, at.month()) };
+            let from = if start == 0 { at.month() } else { start };
+            let first = if picked(from) { from } else { following(mask, from) };
             let next = self.pick(mode, mask, first, now);
             self.month = Some((first, now, next));
             return Some(Season { month: first, fade: None });
         };
-        if now - since < n.season_pass_hold_min.max(0.1) * 60.0 {
+        if now - since < n.season_pass_hold_min.max(SEASON_HOLD_MIN) * 60.0 {
             return Some(Season { month, fade: None });
         }
         // The next chosen ahead, unless the months picked have changed under it.
         let next = if picked(next) && (next != month || mask.count_ones() == 1) { next } else { self.pick(mode, mask, month, now) };
         let after = self.pick(mode, mask, next, now);
         self.month = Some((next, now, after));
-        Some(Season { month: next, fade: (next != month).then(|| n.season_pass_fade_sec.max(1.0)) })
+        Some(Season { month: next, fade: (next != month).then(|| n.season_pass_fade_sec.max(SEASON_FADE_MIN)) })
     }
 
     /// The month to follow `month`: the calendar's next picked one, or, shuffled, any other picked one.
@@ -965,7 +980,7 @@ impl SeasonPass {
     /// Where the tour stands at `now`, while it is on.
     pub fn status(&self, n: &crate::settings::NativeSettings, now: f64) -> Option<SeasonStatus> {
         let (month, since, next) = self.month?;
-        let left = (n.season_pass_hold_min.max(0.1) * 60.0 - (now - since)).max(0.0);
+        let left = (n.season_pass_hold_min.max(SEASON_HOLD_MIN) * 60.0 - (now - since)).max(0.0);
         Some(SeasonStatus { month, next, left })
     }
 }

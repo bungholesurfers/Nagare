@@ -1,5 +1,5 @@
 //! The notification-area (system tray) icon, Windows only: a menu with Settings, Toggle wallpaper and Exit, the app's
-//! controls while it sits behind the desktop icons. `main.rs` makes it once the event loop runs and
+//! controls while it sits behind the desktop icons - and, at its top while one waits, the update Software Update found. `main.rs` makes it once the event loop runs and
 //! polls `take` for what was picked.
 //!
 //! The icon is the logo (`logo.rs`) at the system's small-icon size.
@@ -12,13 +12,26 @@ pub enum Command {
     Settings,
     ToggleWallpaper,
     Exit,
+    /// The update item: install the downloaded update, or open the release page of one this copy cannot install.
+    Update,
 }
 
 pub struct Tray {
     _icon: TrayIcon,
+    menu: Menu,
     settings: MenuItem,
     toggle: MenuItem,
     exit: MenuItem,
+    /// The update item and the separator under it, and what the item says while it shows.
+    update: MenuItem,
+    update_separator: PredefinedMenuItem,
+    update_label: Option<String>,
+}
+
+/// What a notification shows beside its words: the app's logo, or the installer's glass box (an update's).
+pub enum Picture {
+    Logo,
+    UpdateBox(&'static [u8]),
 }
 
 /// The file in the app's folder listing the exes whose first start has pinned the icon, one path a line.
@@ -36,23 +49,55 @@ impl Tray {
         let settings = MenuItem::new("Settings", true, None);
         let toggle = MenuItem::new("Toggle wallpaper", true, None);
         let exit = MenuItem::new("Exit", true, None);
+        let update = MenuItem::new("", true, None);
         let menu = Menu::new();
         menu.append_items(&[&settings, &toggle, &PredefinedMenuItem::separator(), &exit]).map_err(|e| e.to_string())?;
-        let mut builder = TrayIconBuilder::new().with_menu(Box::new(menu)).with_tooltip(product);
+        let mut builder = TrayIconBuilder::new().with_menu(Box::new(menu.clone())).with_tooltip(product);
         match icon() {
             Some(icon) => builder = builder.with_icon(icon),
             None => eprintln!("tray: could not decode the icon; the tray shows none"),
         }
         let icon = builder.build().map_err(|e| e.to_string())?;
         pin();
-        Ok(Tray { _icon: icon, settings, toggle, exit })
+        Ok(Tray {
+            _icon: icon,
+            menu,
+            settings,
+            toggle,
+            exit,
+            update,
+            update_separator: PredefinedMenuItem::separator(),
+            update_label: None,
+        })
     }
 
-    /// Shows a notification: a toast in the app's name, on screen until its button, labelled `dismiss`, puts it away,
-    /// with the logo beside the text; or, where the toast cannot be shown, a balloon from the icon, which Windows 10
-    /// and 11 show as a short toast, with the logo at the large icon's size. Returns how it was shown, or why not.
-    pub fn notify(&self, title: &str, text: &str, dismiss: &str) -> Result<String, String> {
-        match toast(title, text, dismiss) {
+    /// Shows the update item at the menu's top with `label`, or takes it away (None).
+    pub fn set_update(&mut self, label: Option<&str>) {
+        if self.update_label.as_deref() == label {
+            return;
+        }
+        match label {
+            Some(text) => {
+                self.update.set_text(text);
+                if self.update_label.is_none() {
+                    let _ = self.menu.insert(&self.update, 0);
+                    let _ = self.menu.insert(&self.update_separator, 1);
+                }
+            }
+            None => {
+                let _ = self.menu.remove(&self.update);
+                let _ = self.menu.remove(&self.update_separator);
+            }
+        }
+        self.update_label = label.map(str::to_string);
+    }
+
+    /// Shows a notification: a toast in the app's name, with `picture` beside the text - on screen until its button,
+    /// labelled `dismiss`, puts it away, or without one for Windows' usual while; or, where the toast cannot be shown, a
+    /// balloon from the icon, which Windows 10 and 11 show as a short toast, with the logo at the large icon's size.
+    /// Returns how it was shown, or why not.
+    pub fn notify(&self, title: &str, text: &str, dismiss: Option<&str>, picture: Picture) -> Result<String, String> {
+        match toast(title, text, dismiss, picture) {
             Ok(()) => Ok("as a toast".into()),
             Err(e) if self.balloon(title, text) => Ok(format!("as a balloon (no toast: {e})")),
             Err(e) => Err(format!("no toast ({e}), and no balloon")),
@@ -103,6 +148,9 @@ impl Tray {
             }
             if event.id == *self.toggle.id() {
                 return Some(Command::ToggleWallpaper);
+            }
+            if event.id == *self.update.id() {
+                return Some(Command::Update);
             }
             if event.id == *self.exit.id() {
                 return Some(Command::Exit);
@@ -216,7 +264,7 @@ const AUMID: &str = "Nagare";
 /// A toast in the app's name: the title, the text and the logo, at 128 pixels, in place of the app's small picture.
 /// As a reminder, it stays on screen until its one button, Windows' own dismissal, is pressed (a reminder must have a
 /// button). The logo is written beside the config, where the registration and the toast point at it.
-fn toast(title: &str, text: &str, dismiss: &str) -> Result<(), String> {
+fn toast(title: &str, text: &str, dismiss: Option<&str>, picture: Picture) -> Result<(), String> {
     use windows::core::HSTRING;
     use windows::Data::Xml::Dom::XmlDocument;
     use windows::UI::Notifications::{ToastNotification, ToastNotificationManager};
@@ -227,17 +275,29 @@ fn toast(title: &str, text: &str, dismiss: &str) -> Result<(), String> {
     std::fs::write(&logo, crate::logo::png(128)).map_err(|e| format!("{}: {e}", logo.display()))?;
     let logo = logo.to_string_lossy().into_owned();
     register(&logo)?;
+    // The picture beside the words: the logo, or an update's box, written beside it.
+    let image = match picture {
+        Picture::Logo => logo.clone(),
+        Picture::UpdateBox(png) => {
+            let path = dir.join("update-128.png");
+            std::fs::write(&path, png).map_err(|e| format!("{}: {e}", path.display()))?;
+            path.to_string_lossy().into_owned()
+        }
+    };
     let escape = |s: &str| s.replace('&', "&amp;").replace('<', "&lt;").replace('>', "&gt;").replace('"', "&quot;");
-    let xml = format!(
-        concat!(
-            r#"<toast scenario="reminder"><visual><binding template="ToastGeneric"><text>{}</text><text>{}</text>"#,
-            r#"<image placement="appLogoOverride" src="{}"/></binding></visual>"#,
-            r#"<actions><action activationType="system" arguments="dismiss" content="{}"/></actions></toast>"#
+    // A reminder stays until its button puts it away (a reminder must have one); otherwise Windows' usual while.
+    let (scenario, actions) = match dismiss {
+        Some(label) => (
+            r#" scenario="reminder""#,
+            format!(r#"<actions><action activationType="system" arguments="dismiss" content="{}"/></actions>"#, escape(label)),
         ),
+        None => ("", String::new()),
+    };
+    let xml = format!(
+        r#"<toast{scenario}><visual><binding template="ToastGeneric"><text>{}</text><text>{}</text><image placement="appLogoOverride" src="{}"/></binding></visual>{actions}</toast>"#,
         escape(title),
         escape(text),
-        escape(&logo),
-        escape(dismiss)
+        escape(&image),
     );
     let show = || -> windows::core::Result<()> {
         let doc = XmlDocument::new()?;

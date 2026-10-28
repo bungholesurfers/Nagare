@@ -701,6 +701,18 @@ impl Scene {
         self.post.ae.fresh = true;
     }
 
+    /// The wave's light buffer as the composite reads it - the sub-frames' sum while motion-blurred - and its scale, one
+    /// over the sub-frames, for the disco ball's spots.
+    pub fn wave_light(&self) -> Option<(&Tex, f32)> {
+        let wave = if self.post.subframes > 1 { self.post.wave_sum.as_ref() } else { self.post.wave.as_ref() };
+        wave.map(|w| (w, 1.0 / self.post.subframes as f32))
+    }
+
+    /// The wave's mesh as it was last drawn - `built`, the GPU's, or the CPU's - for the disco ball's light.
+    pub fn wave_geometry<'a>(&'a self, built: Option<&'a wgpu::Buffer>) -> Geometry<'a> {
+        Geometry::Indexed { vertices: [built.unwrap_or(&self.mesh), &self.uv], indices: &self.indices, count: self.index_count }
+    }
+
     /// AE's last peak and boost, as read back.
     pub fn auto_exposure(&mut self) -> (Option<f64>, f64) {
         self.post.ae.readout(self.ae_format)

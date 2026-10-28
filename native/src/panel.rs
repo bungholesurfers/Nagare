@@ -26,6 +26,9 @@ use crate::settings::{
 const TABS: [&str; 9] = ["Scene", "Input", "Backdrop", "Wave", "Post", "Particles", "Panel", "Resources", "Maru-time"];
 // The label column's width, in points: the longest names (aeHighlightTarget) fit.
 const LABEL_WIDTH: f32 = 168.0;
+// The scroll hint: how many scrolls down put it away, and how far apart in time two must be to count as two.
+const SCROLL_GESTURES: u32 = 1;
+const SCROLL_GAP: f64 = 0.6;
 // The lowest frame cap the panel and --fps take.
 pub const MIN_FPS: f64 = 6.0;
 const AMBER: Color32 = Color32::from_rgb(0xff, 0xb3, 0x47);
@@ -150,6 +153,8 @@ pub struct Actions {
     /// Software Update's Check now, and its Reinstall, which installs the stable version whatever this one is.
     pub check_update: bool,
     pub reinstall_update: bool,
+    /// The downloaded update installed now: the status line's Install now.
+    pub install_update: bool,
     /// Where the panel's window lies, in points, for the blur under it.
     pub window: Option<egui::Rect>,
 }
@@ -167,6 +172,7 @@ impl Actions {
         self.intro_now |= other.intro_now;
         self.check_update |= other.check_update;
         self.reinstall_update |= other.reinstall_update;
+        self.install_update |= other.install_update;
     }
 }
 
@@ -233,6 +239,8 @@ pub struct Header<'a> {
     pub update_auto: &'a mut bool,
     pub update_status: &'a str,
     pub update_link: bool,
+    /// The version downloaded and checked, waiting for Install now, if one is.
+    pub update_ready: Option<String>,
 }
 
 /// What the header's own buttons ask for.
@@ -263,6 +271,15 @@ pub struct Panel {
     /// until the button reveals it - for as long as the recorder keeps running.
     pub streamer: bool,
     gpu_revealed: bool,
+    /// The hint at the panel's foot that more knobs lie below, until the panel has been scrolled down SCROLL_GESTURES
+    /// times (`main.rs` keeps its dismissal in the config, `scrollHintDismissed`); the scroll offset last seen, the
+    /// scrolls down counted, and when the last one moved it.
+    pub scroll_hint: bool,
+    scroll_last: f32,
+    scroll_gestures: u32,
+    scroll_at: f64,
+    /// The link clicked, whose prompt asks whether to open it in the browser, copy it, or neither (`link`).
+    link_asked: Option<String>,
 }
 
 impl Panel {
@@ -285,9 +302,56 @@ impl Panel {
             title: Title::new(false),
             held: Vec::new(),
             month_swatches: None,
+            link_asked: None,
             streamer: false,
             gpu_revealed: false,
+            scroll_hint: true,
+            scroll_last: 0.0,
+            scroll_gestures: 0,
+            scroll_at: f64::NEG_INFINITY,
         }
+    }
+
+    /// The hint at the panel's foot, "Scroll down to see more knobs!", for new users: a plain dark pill, bobbing to catch
+    /// the eye, its arrow bouncing, while there are knobs below. Scrolling down - by the wheel or the bar - SCROLL_GESTURES
+    /// times (once: that shows the user knows), each a scroll apart from the last by SCROLL_GAP, puts it away for good.
+    fn scroll_hint<R>(&mut self, ui: &egui::Ui, out: &egui::scroll_area::ScrollAreaOutput<R>) {
+        if !self.scroll_hint {
+            return;
+        }
+        let t = ui.input(|i| i.time);
+        let offset = out.state.clamped_offset().y;
+        if offset > self.scroll_last + 1.0 {
+            if t - self.scroll_at > SCROLL_GAP {
+                self.scroll_gestures += 1;
+            }
+            self.scroll_at = t;
+        }
+        self.scroll_last = offset;
+        if self.scroll_gestures >= SCROLL_GESTURES {
+            self.scroll_hint = false;
+            return;
+        }
+        let view = out.inner_rect;
+        if out.content_size.y - view.height() - offset < 40.0 {
+            return;
+        }
+        let bob = ((t * 3.2).sin() * 3.0) as f32;
+        let painter = ui.painter();
+        let galley = painter.layout_no_wrap("Scroll down to see more knobs!".into(), egui::FontId::proportional(13.0), Color32::WHITE);
+        // Room for the arrow after the words, a chevron drawn (the panel's fonts have no arrows).
+        let size = galley.size() + egui::vec2(32.0 + 16.0, 12.0);
+        let rect = egui::Rect::from_center_size(egui::pos2(view.center().x, view.bottom() - 26.0 + bob), size);
+        let alpha = |a: f32| (a * 255.0) as u8;
+        // A plain dark pill, a faint edge about it.
+        painter.rect(rect, rect.height() / 2.0, Color32::from_black_alpha(190), egui::Stroke::new(1.0, Color32::from_white_alpha(40)), egui::StrokeKind::Inside);
+        let text = egui::pos2(rect.center().x - (galley.size().x + 16.0) / 2.0, rect.center().y - galley.size().y / 2.0);
+        let arrow = egui::pos2(text.x + galley.size().x + 10.0, rect.center().y + ((t * 6.4).sin() * 1.5) as f32);
+        painter.galley(text, galley, Color32::from_white_alpha(alpha(1.0)));
+        let stroke = egui::Stroke::new(1.8, Color32::from_white_alpha(alpha(1.0)));
+        painter.line_segment([arrow + egui::vec2(-4.5, -2.5), arrow + egui::vec2(0.0, 2.5)], stroke);
+        painter.line_segment([arrow + egui::vec2(0.0, 2.5), arrow + egui::vec2(4.5, -2.5)], stroke);
+        ui.ctx().request_repaint();
     }
 
     /// Whether `key`, an app setting, is held off this frame (softwareLite).
@@ -450,8 +514,8 @@ impl Panel {
             if let Some(y) = std::env::var("NAGARE_PANEL_SCROLL").ok().and_then(|v| v.parse::<f32>().ok()) {
                 scroll = scroll.vertical_scroll_offset(y);
             }
-            scroll.show(ui, |ui| {
-                brand(ui, &mut self.title);
+            let out = scroll.show(ui, |ui| {
+                brand(ui, &mut self.title, &mut self.link_asked);
                 ui.separator();
                 ui.horizontal(|ui| {
                     let (hide, hint) = if standalone {
@@ -475,7 +539,7 @@ impl Panel {
                     ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                         if ui
                             .button("Reinstall")
-                            .on_hover_text("Download the stable version from GitHub and install it now, even if this copy already is that version (or newer): a repair, or a way back to the stable one.\nIt is checked as any update is: only the release key's signed files install. Only a copy the installer installed can do it.")
+                            .on_hover_text("Download the channel's version (the stable one, or the latest release) from GitHub and install it now, even if this copy already is that version (or newer): a repair, or a way back to it.\nIt is checked as any update is: only the release key's signed files install. Only a copy the installer installed can do it.")
                             .clicked()
                         {
                             actions.reinstall_update = true;
@@ -486,14 +550,38 @@ impl Panel {
                         ui.checkbox(&mut *header.update_auto, "Auto-check").on_hover_text(
                             "Check GitHub for a newer version every day or two (the first check a while after Nagare starts), and install it by itself.\nNothing about you or your PC is sent: only the request.",
                         );
+                        // The channel, updateChannel: the stable tag, or the newest release published.
+                        let channel = native.update_channel.round() as u8;
+                        let mut picked = channel;
+                        egui::ComboBox::from_id_salt("update-channel")
+                            .selected_text(if channel == 0 { "Stable" } else { "Latest release" })
+                            .show_ui(ui, |ui| {
+                                ui.selectable_value(&mut picked, 0, "Stable");
+                                ui.selectable_value(&mut picked, 1, "Latest release");
+                            })
+                            .response
+                            .on_hover_text("Which version to update to. Stable: the one the repository's update/stable.txt names. Latest release: the newest release published on GitHub, as soon as it is out. Either way only the release key's signed files install.");
+                        if picked != channel {
+                            self.native.set("updateChannel", picked as f64, native);
+                        }
                         ui.label("Software Update:");
                     });
                 });
                 if !header.update_status.is_empty() {
                     ui.horizontal(|ui| {
                         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                            if let Some(version) = &header.update_ready {
+                                link(ui, RichText::new("What's new").small(), &crate::update::release_page(version), &mut self.link_asked);
+                                if ui
+                                    .small_button("Install now")
+                                    .on_hover_text("Install the downloaded update now: Nagare closes for a few seconds, then starts again, settings and all")
+                                    .clicked()
+                                {
+                                    actions.install_update = true;
+                                }
+                            }
                             if header.update_link {
-                                ui.hyperlink_to(RichText::new("the releases' page").small(), crate::update::RELEASES_PAGE);
+                                link(ui, RichText::new("the releases' page").small(), crate::update::RELEASES_PAGE, &mut self.link_asked);
                             }
                             ui.label(RichText::new(header.update_status).weak().small());
                         });
@@ -520,14 +608,27 @@ impl Panel {
                     )).color(AMBER).small()).wrap());
                 }
                 ui.separator();
+                // The tabs: in Segoe UI Semibold where Windows has it, each in a faint square frame, the chosen one lit.
+                let tab_font = crate::warning::system_font(ui.ctx(), Some(TAB_FONT));
                 ui.horizontal_wrapped(|ui| {
                     for (i, name) in TABS.iter().enumerate() {
                         let changed = self.tab_changes(name);
-                        // Maru-chan's tab wears its boat; its name stays plain, for --tab and the config.
-                        let shown = if *name == "Maru-time" { "⛵ Maru-time" } else { name };
+                        // Maru-chan's tab holds more than maru-chan: the disco ball, and the like.
+                        let shown = if *name == "Maru-time" { "Maru-time, etc." } else { name };
                         let label = if changed > 0 { format!("{shown} ({changed})") } else { shown.to_string() };
-                        let text = if changed > 0 { RichText::new(label).color(AMBER) } else { RichText::new(label) };
-                        if ui.selectable_label(self.tab == i, text).clicked() {
+                        let mut text = if changed > 0 { RichText::new(label).color(AMBER) } else { RichText::new(label).strong() };
+                        if let Some(family) = &tab_font {
+                            text = text.family(family.clone());
+                        }
+                        // Maru-chan's tab wears its boat, in egui's own font, which has it; its name stays plain, for
+                        // --tab and the config.
+                        let mut job = egui::text::LayoutJob::default();
+                        let style = ui.style().clone();
+                        if *name == "Maru-time" {
+                            RichText::new("⛵ ").strong().append_to(&mut job, &style, egui::FontSelection::Default, egui::Align::Center);
+                        }
+                        text.append_to(&mut job, &style, egui::FontSelection::Default, egui::Align::Center);
+                        if ui.add(egui::Button::new(job).selected(self.tab == i).frame(true)).clicked() {
                             self.tab = i;
                         }
                     }
@@ -565,7 +666,7 @@ impl Panel {
                                     ui.spacing_mut().item_spacing.x = 0.0;
                                     ui.label(RichText::new("Naive take of ").weak().small());
                                     let url = "https://www.nukepedia.com/tools/gizmos/draw/alexagrain/";
-                                    ui.hyperlink_to(RichText::new(url).small(), url);
+                                    link(ui, RichText::new(url).small(), url, &mut self.link_asked);
                                     ui.label(RichText::new(", Riley Gray's AlexaGrain gizmo for Nuke").weak().small());
                                 });
                             }
@@ -631,6 +732,7 @@ impl Panel {
                     }
                 }
             });
+            self.scroll_hint(ui, &out);
         };
         // Over the blur, the frames are left clear: the blur lays its own tint.
         if standalone {
@@ -668,8 +770,39 @@ impl Panel {
             ctx.global_style_mut(|s| s.visuals.widgets.open.weak_bg_fill = open_fill);
             actions.window = shown.map(|r| r.response.rect);
         }
+        self.link_prompt(ctx);
         text_shadows(ctx);
         actions
+    }
+
+    /// The prompt over everything for the link clicked (`link`): its address, and whether to open it in the browser,
+    /// copy it, or neither - Escape or a click beside it being No.
+    fn link_prompt(&mut self, ctx: &egui::Context) {
+        let Some(url) = self.link_asked.clone() else { return };
+        let mut done = false;
+        let shown = egui::Modal::new(egui::Id::unique("link-prompt")).show(ctx, |ui| {
+            ui.set_max_width(480.0);
+            ui.label(RichText::new("Open this page in your web browser?").strong());
+            ui.add_space(6.0);
+            ui.add(egui::Label::new(RichText::new(&url).monospace()).wrap());
+            ui.add_space(10.0);
+            ui.horizontal(|ui| {
+                if ui.button("Yes").clicked() {
+                    ctx.open_url(egui::OpenUrl::new_tab(&url));
+                    done = true;
+                }
+                if ui.button("Copy to clipboard").on_hover_text("Copy the address, and open nothing").clicked() {
+                    ctx.copy_text(url.clone());
+                    done = true;
+                }
+                if ui.button("No").clicked() {
+                    done = true;
+                }
+            });
+        });
+        if done || shown.should_close() {
+            self.link_asked = None;
+        }
     }
 
     fn tab_changes(&self, tab: &str) -> usize {
@@ -794,7 +927,17 @@ pub struct Title {
     /// Whether the config is to say it has been clicked: it was, this run or before.
     pub remembered: bool,
     seed: u64,
+    /// The greeting as the settings appear: a gag for GREET_HOLD, then the name sliding up into its place over
+    /// GREET_SLIDE; and when the title was last drawn, to tell a new appearance from the next frame.
+    greet: Option<(usize, std::time::Instant)>,
+    last_drawn: Option<std::time::Instant>,
 }
+
+/// The greeting: how long the gag shows, how long the slide takes, and how long the title must have been away for its
+/// return to count as the settings appearing.
+const GREET_HOLD: f64 = 2.0;
+const GREET_SLIDE: f64 = 0.55;
+const GREET_AWAY: f64 = 0.5;
 
 const GAGS: usize = 7;
 
@@ -802,7 +945,7 @@ impl Title {
     /// `clicked_before`: what the config says.
     pub fn new(clicked_before: bool) -> Self {
         let seed = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(1, |d| d.as_nanos() as u64) | 1;
-        Title { shown: 0, since: 0.0, random: clicked_before, round: Vec::new(), remembered: clicked_before, seed }
+        Title { shown: 0, since: 0.0, random: clicked_before, round: Vec::new(), remembered: clicked_before, seed, greet: None, last_drawn: None }
     }
 
     fn click(&mut self, now: f64) {
@@ -831,11 +974,15 @@ impl Title {
     }
 
     fn text(&self, now: f64) -> String {
-        let t = (now - self.since).max(0.0);
-        match self.shown {
+        Self::text_of(self.shown, (now - self.since).max(0.0))
+    }
+
+    /// What `shown` reads, `t` seconds after it came.
+    fn text_of(shown: usize, t: f64) -> String {
+        match shown {
             1 => format!("Naga-r{}", "e".repeat(2 + ((t * 2.4) as usize).min(14))),
             2 => "Nagheenanajar".into(),
-            3 => "Naganna work here anymore!".into(),
+            3 => "Naga... ...Naganna work here anymore! HAH".into(),
             4 => "Nagatoro".into(),
             5 => "Legally-distinct spline mesh".into(),
             6 => format!("{}…", SPINNER[(t / 0.5) as usize % SPINNER.len()]),
@@ -843,8 +990,36 @@ impl Title {
         }
     }
 
+    /// A gag at random, as the greeting's.
+    fn pick_gag(&mut self) -> usize {
+        self.seed ^= self.seed << 13;
+        self.seed ^= self.seed >> 7;
+        self.seed ^= self.seed << 17;
+        1 + (self.seed % (GAGS as u64 - 1)) as usize
+    }
+
     fn show(&mut self, ui: &mut egui::Ui) {
         let now = ui.input(|i| i.time);
+        // The settings appearing - the title drawn again after a while away - greet with a gag, unless one shows anyway.
+        let real = std::time::Instant::now();
+        let away = self.last_drawn.is_none_or(|l| real.duration_since(l).as_secs_f64() > GREET_AWAY);
+        self.last_drawn = Some(real);
+        if away && self.shown == 0 {
+            self.greet = Some((self.pick_gag(), real));
+        }
+        if let Some((gag, at)) = self.greet {
+            let e = real.duration_since(at).as_secs_f64();
+            if e >= GREET_HOLD + GREET_SLIDE {
+                self.greet = None;
+            } else {
+                if self.greeting(ui, gag, e) {
+                    self.greet = None;
+                    self.click(now);
+                }
+                ui.ctx().request_repaint();
+                return;
+            }
+        }
         let title = ui
             .add(egui::Label::new(RichText::new(self.text(now)).size(30.0).strong()).selectable(false).sense(egui::Sense::click()))
             .on_hover_cursor(egui::CursorIcon::PointingHand);
@@ -858,24 +1033,62 @@ impl Title {
     }
 }
 
+impl Title {
+    /// The greeting, `e` seconds in: the gag alone for GREET_HOLD, then the gag sliding up out of the title's line as
+    /// the name slides up into it from below, on a sharp ease-in - slow to start, then quick. Returns whether it was
+    /// clicked, which, as on the name, brings the next gag.
+    fn greeting(&self, ui: &mut egui::Ui, gag: usize, e: f64) -> bool {
+        let font = egui::FontId::proportional(30.0);
+        let colour = ui.visuals().strong_text_color();
+        let galley = |text: String| ui.painter().layout_no_wrap(text, font.clone(), colour);
+        let (from, to) = (galley(Self::text_of(gag, e)), galley(Self::text_of(0, 0.0)));
+        let size = egui::vec2(from.size().x.max(to.size().x), from.size().y.max(to.size().y));
+        let (rect, response) = ui.allocate_exact_size(size, egui::Sense::click());
+        let response = response.on_hover_cursor(egui::CursorIcon::PointingHand);
+        let p = ((e - GREET_HOLD) / GREET_SLIDE).clamp(0.0, 1.0) as f32;
+        let lift = p.powi(4) * size.y;
+        let painter = ui.painter_at(rect);
+        painter.galley(rect.min - egui::vec2(0.0, lift), from, colour);
+        painter.galley(rect.min + egui::vec2(0.0, size.y - lift), to, colour);
+        response.clicked()
+    }
+}
+
 /// The console's settings' heading.
 fn console_heading(ui: &mut egui::Ui) {
     ui.label(RichText::new("Console-original knobs").size(20.0).strong())
         .on_hover_text("The console's own parameters, as its files and code hold them, which the scene's sets write");
 }
 
-/// The app's name - its gags, as clicks on it bring them - what it is, and whose work it stands on.
-fn brand(ui: &mut egui::Ui, title: &mut Title) {
+/// A link in the panel, drawn as egui's hyperlinks are, its address in its tooltip; a click only asks first, in the
+/// panel's prompt (`link_asked`), whether to open it in the browser.
+fn link(ui: &mut egui::Ui, text: impl Into<egui::WidgetText>, url: &str, asked: &mut Option<String>) {
+    if ui.link(text).on_hover_text(url).clicked() {
+        *asked = Some(url.to_string());
+    }
+}
+
+/// The app's name - its gags, as clicks on it bring them - what it is, where it lives, and whose work it stands on.
+fn brand(ui: &mut egui::Ui, title: &mut Title, asked: &mut Option<String>) {
     title.show(ui);
-    ui.label(RichText::new("The PlayStation 3 VSH's flowing waves and sparkles, recreated as a live desktop wallpaper.").weak());
-    ui.horizontal_wrapped(|ui| {
-        ui.spacing_mut().item_spacing.x = 0.0;
-        let small = |text: &str| RichText::new(text).small();
-        ui.label(small("A rusty desktop port, based on the breakthrough research of "));
-        ui.hyperlink_to(small("faquino/PlayStation-3-XMB"), "https://github.com/faquino/PlayStation-3-XMB");
-        ui.label(small(" and "));
-        ui.hyperlink_to(small("linkev/PlayStation-3-XMB"), "https://github.com/linkev/PlayStation-3-XMB");
-        ui.label(small("."));
+    ui.label(RichText::new("The PlayStation 3 VSH background, reverse-engineered, and slightly enhanced.").weak());
+    let small = |text: &str| RichText::new(text).small();
+    // Small lines, as close as the text's own: no row as tall as a button's.
+    ui.scope(|ui| {
+        ui.spacing_mut().interact_size.y = 0.0;
+        ui.horizontal_wrapped(|ui| {
+            ui.spacing_mut().item_spacing.x = 0.0;
+            ui.label(small("Nagare's home - its source, releases and issues: "));
+            link(ui, small("github.com/bungholesurfers/Nagare"), "https://github.com/bungholesurfers/Nagare", asked);
+        });
+        ui.horizontal_wrapped(|ui| {
+            ui.spacing_mut().item_spacing.x = 0.0;
+            ui.label(small("A rusty desktop port, based on the breakthrough research of "));
+            link(ui, small("faquino/PlayStation-3-XMB"), "https://github.com/faquino/PlayStation-3-XMB", asked);
+            ui.label(small(" and "));
+            link(ui, small("linkev/PlayStation-3-XMB"), "https://github.com/linkev/PlayStation-3-XMB", asked);
+            ui.label(small(". Without them, Nagare would be nada!"));
+        });
     });
 }
 
@@ -1361,7 +1574,8 @@ fn sliders<P: Params>(
 
 /// Season Pass's months: a swatch of each month's backdrop - its day's texture over its night's, as the fits in
 /// `months.rs` give them - with its name under it, a toggle kept in seasonPassMonths as bits, January the lowest (at
-/// least one stays); the one showing outlined; and what the tour is doing, a line under them.
+/// least one stays); the one showing glowing white as it breathes, a play mark on it; and what the tour is doing, a line
+/// under them.
 #[allow(clippy::too_many_arguments)]
 fn season_months(
     ui: &mut egui::Ui,
@@ -1392,9 +1606,20 @@ fn season_months(
                 .vertical(|ui| {
                     let tint = if on { Color32::WHITE } else { Color32::from_white_alpha(60) };
                     let image = egui::Image::new(&textures[i]).fit_to_exact_size(egui::vec2(SIZE[0] as f32, SIZE[1] as f32)).tint(tint).corner_radius(4.0);
+                    // The month showing glows, behind its swatch: a place kept for it before the swatch is drawn.
+                    let glow = (showing == Some(i as u32 + 1)).then(|| ui.painter().add(egui::Shape::Noop));
                     let swatch = ui.add(image.sense(egui::Sense::click())).on_hover_text(format!("{}: the day's backdrop over the night's. Click to {} the tour", month_name(name), if on { "leave it out of" } else { "take it into" }));
-                    if showing == Some(i as u32 + 1) {
-                        ui.painter().rect_stroke(swatch.rect, 4.0, egui::Stroke::new(2.0, AMBER), egui::StrokeKind::Outside);
+                    if let Some(glow) = glow {
+                        // Breathing: the glow comes up over a second and dies down over the next.
+                        let breath = (0.5 - 0.5 * (ui.input(|i| i.time) * std::f64::consts::PI).cos()) as f32;
+                        let shadow = egui::epaint::Shadow { offset: [0, 0], blur: 12, spread: 2, color: Color32::from_white_alpha((255.0 * breath) as u8) };
+                        ui.painter().set(glow, shadow.as_shape(swatch.rect, 4.0));
+                        // A play mark in its middle, outlined to read on the pale months too.
+                        let c = swatch.rect.center();
+                        let s = 7.0;
+                        let play = vec![c + egui::vec2(-0.45 * s, -0.6 * s), c + egui::vec2(0.65 * s, 0.0), c + egui::vec2(-0.45 * s, 0.6 * s)];
+                        ui.painter().add(egui::Shape::convex_polygon(play, Color32::from_white_alpha(235), egui::Stroke::new(1.0, Color32::from_black_alpha(150))));
+                        ui.ctx().request_repaint();
                     }
                     let label = ui.selectable_label(on, RichText::new(*name).small());
                     swatch.clicked() || label.clicked()
@@ -1468,8 +1693,34 @@ fn trim_number(v: f64) -> String {
     s.trim_end_matches('0').trim_end_matches('.').to_string()
 }
 
-/// The panel's look, for whichever context draws it: dark, roomier than egui's own, its corners rounder, at the Panel
-/// tab's size.
+/// The tabs' font, in Windows' fonts folder: Segoe UI Semibold.
+const TAB_FONT: &str = "seguisb.ttf";
+
+/// What egui fills a chosen button, a selectable label or selected text with - an odd grey no other shape is filled
+/// with, so that `text_shadows` finds them and paints the PSP's highlight over them instead: a pale bar, lighter at
+/// its top, with a fine light edge, its corners square.
+const SELECTION: Color32 = Color32::from_rgba_premultiplied(91, 93, 98, 97);
+
+/// The PSP's highlight over `rect`.
+fn psp_highlight(rect: egui::Rect) -> egui::Shape {
+    let mut mesh = egui::Mesh::default();
+    let (top, bottom) = (Color32::from_white_alpha(118), Color32::from_white_alpha(78));
+    for (pos, colour) in [(rect.left_top(), top), (rect.right_top(), top), (rect.right_bottom(), bottom), (rect.left_bottom(), bottom)] {
+        mesh.colored_vertex(pos, colour);
+    }
+    mesh.add_triangle(0, 1, 2);
+    mesh.add_triangle(0, 2, 3);
+    let edge = egui::Stroke::new(1.0_f32, Color32::from_white_alpha(150));
+    let shine = egui::Stroke::new(1.0_f32, Color32::from_white_alpha(210));
+    egui::Shape::Vec(vec![
+        egui::Shape::mesh(mesh),
+        egui::Shape::rect_stroke(rect, 0.0, edge, egui::StrokeKind::Inside),
+        egui::Shape::line_segment([rect.left_top() + egui::vec2(1.0, 0.5), rect.right_top() + egui::vec2(-1.0, 0.5)], shine),
+    ])
+}
+
+/// The panel's look, for whichever context draws it: dark, roomier than egui's own, its buttons square as the PSP's,
+/// at the Panel tab's size.
 fn style(ctx: &egui::Context, scale: f64) {
     let zoom = scale.clamp(0.5, 3.0) as f32;
     if (ctx.zoom_factor() - zoom).abs() > 1e-3 {
@@ -1487,10 +1738,19 @@ fn style(ctx: &egui::Context, scale: f64) {
         v.faint_bg_color = Color32::from_white_alpha(6);
         v.extreme_bg_color = Color32::from_black_alpha(90);
         for w in [&mut v.widgets.inactive, &mut v.widgets.hovered, &mut v.widgets.active, &mut v.widgets.open] {
-            w.corner_radius = egui::CornerRadius::same(6);
+            w.corner_radius = egui::CornerRadius::ZERO;
         }
         v.widgets.inactive.weak_bg_fill = Color32::from_white_alpha(14);
         v.widgets.inactive.bg_fill = Color32::from_white_alpha(18);
+        // Hovered, a fine light edge; pressed, paler; chosen, the PSP's highlight (SELECTION), its words white.
+        v.widgets.hovered.weak_bg_fill = Color32::from_white_alpha(26);
+        v.widgets.hovered.bg_fill = Color32::from_white_alpha(30);
+        v.widgets.hovered.bg_stroke = egui::Stroke::new(1.0_f32, Color32::from_white_alpha(70));
+        v.widgets.active.weak_bg_fill = Color32::from_white_alpha(56);
+        v.widgets.active.bg_fill = Color32::from_white_alpha(60);
+        v.widgets.active.bg_stroke = egui::Stroke::new(1.0_f32, Color32::from_white_alpha(120));
+        v.selection.bg_fill = SELECTION;
+        v.selection.stroke = egui::Stroke::new(1.0_f32, Color32::WHITE);
         v.widgets.noninteractive.bg_stroke = egui::Stroke::new(1.0_f32, Color32::from_white_alpha(22));
         // Whiter text than egui's dark theme, which the shadows keep legible over a light backdrop.
         v.widgets.noninteractive.fg_stroke.color = Color32::from_gray(215);
@@ -1504,7 +1764,8 @@ const SHADOW_OFFSET: f32 = 1.0;
 const SHADOW_ALPHA: f32 = 0.55;
 
 /// Lays a soft dark copy of every text the panel drew just below it, as a drop shadow: egui has none, so the shapes
-/// the pass painted are rewritten, each text into the shadow and the text over it. The perf overlay has a context of
+/// the pass painted are rewritten, each text into the shadow and the text over it - and each chosen thing's fill into
+/// the PSP's highlight (`psp_highlight`). The perf overlay has a context of
 /// its own, which this never touches.
 fn text_shadows(ctx: &egui::Context) {
     fn shadowed(shape: &mut egui::Shape) {
@@ -1518,6 +1779,7 @@ fn text_shadows(ctx: &egui::Context) {
                 let text = std::mem::replace(shape, egui::Shape::Noop);
                 *shape = egui::Shape::Vec(vec![egui::Shape::Text(shadow), text]);
             }
+            egui::Shape::Rect(rect) if rect.fill == SELECTION => *shape = psp_highlight(rect.rect),
             egui::Shape::Vec(shapes) => shapes.iter_mut().for_each(shadowed),
             _ => {}
         }

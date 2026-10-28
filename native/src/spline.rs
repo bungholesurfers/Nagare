@@ -306,6 +306,16 @@ impl SplineLayer {
         self.backdrop.black = true;
     }
 
+    /// The wave's mesh as it was last drawn - its vertex array and index count - for the disco ball's light.
+    pub fn wave_mesh(&self) -> (glow::VertexArray, i32) {
+        (self.vao, self.index_count)
+    }
+
+    /// The wave's light buffer and its scale, for the disco ball's spots (`postprocess.rs`'s `wave_light`).
+    pub fn wave_light(&self) -> Option<(glow::Texture, f32)> {
+        self.post.wave_light()
+    }
+
     /// The app's auto exposure: its last peak, if it has one, and what it adds to the exposure, read back from the GPU
     /// at most twice a second.
     pub fn auto_exposure(&mut self, gl: &Gl) -> (Option<f64>, f64) {

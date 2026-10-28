@@ -119,6 +119,12 @@ pub fn disco_ball() -> Source {
 pub fn disco_sprites() -> Source {
     Source { name: "disco sprites", vs: crate::disco::SPRITE_VS.into(), fs: crate::disco::SPRITE_FS.into(), attributes: &["aPos", "aCorner", "aScreen", "aColor"] }
 }
+pub fn disco_gobo() -> Source {
+    Source { name: "disco gobo", vs: crate::disco::GOBO_VS.into(), fs: crate::disco::GOBO_FS.into(), attributes: &["aCorner", "aTile", "aMore"] }
+}
+pub fn disco_lit() -> Source {
+    Source { name: "disco lit", vs: crate::disco::LIT_VS.into(), fs: crate::disco::LIT_FS.into(), attributes: &["aPos", "aNormal", "aUv"] }
+}
 pub fn maru_down() -> Source {
     fullscreen("maru down", crate::maru::DOWN_FS)
 }

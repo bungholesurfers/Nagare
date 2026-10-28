@@ -32,13 +32,13 @@ const BENCH_MEASURE: f64 = 8.0;
 /// The result shows this long, then fades over RESULT_FADE: 13 s in all.
 const RESULT_HOLD: f64 = 12.4;
 const RESULT_FADE: f64 = 0.6;
-/// The benchmark's screen lets the scene through from REVEAL_AT over REVEAL_IN, slowly, most of the run, and lets
-/// its blur go from UNBLUR_AT over UNBLUR (all halved when short); as its result comes, the blur and the black come
-/// back over REVEAL_OUT.
-const REVEAL_AT: f64 = 2.0;
-const REVEAL_IN: f64 = 6.5;
-const UNBLUR_AT: f64 = 3.5;
-const UNBLUR: f64 = 2.5;
+/// The benchmark's screen lets the scene through from REVEAL_AT over REVEAL_IN and lets its blur go from UNBLUR_AT
+/// over UNBLUR, short or long alike - the scene itself comes in slowly under it, by the XMB's own fade (main.rs's
+/// BENCH_FADE_MS); as its result comes, the blur and the black come back over REVEAL_OUT.
+const REVEAL_AT: f64 = 0.0;
+const REVEAL_IN: f64 = 0.5;
+const UNBLUR_AT: f64 = 0.0;
+const UNBLUR: f64 = 0.5;
 const REVEAL_OUT: f64 = 1.0;
 /// The card: when the words begin to roll, after CARD_IN and CARD_STILL, the roll, the hold on the last word, the
 /// fade out; and its fade in from black, which runs on over the first of them. The roll is the first click, on to the
@@ -123,17 +123,16 @@ impl Intro {
     }
 
     /// How the benchmark's screen shows the scene: how far it lets it through (0 black, 1 the scene), and how far it
-    /// is blurred. Black, then the scene coming slowly through, blurred, the blur going on the way; as the result comes, the blur and
-    /// the black back together over REVEAL_OUT. The scene comes through and goes on an ease-in, slow at first: from
-    /// black it stays dim long, and into black it lingers, then goes.
+    /// is blurred. Black, then the scene coming through, blurred, the blur going on the way; as the result comes, the
+    /// blur and the black back together over REVEAL_OUT. The scene comes through and goes on an ease-in, slow at first:
+    /// into black it lingers, then goes.
     pub fn reveal(&self, now: f64) -> (f32, f32) {
-        let k = if self.short { 0.5 } else { 1.0 };
         let ease_in = |x: f64| (x.clamp(0.0, 1.0) as f32).powi(2);
         match self.stage {
             Stage::Bench { wall, .. } => {
                 let t = wall.elapsed().as_secs_f64();
-                let through = ease_in((t - REVEAL_AT * k) / (REVEAL_IN * k));
-                let blur = 1.0 - smooth((t - UNBLUR_AT * k) / (UNBLUR * k));
+                let through = ease_in((t - REVEAL_AT) / REVEAL_IN);
+                let blur = 1.0 - smooth((t - UNBLUR_AT) / UNBLUR);
                 (through, blur)
             }
             Stage::Result { since } => {

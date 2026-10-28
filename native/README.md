@@ -1,10 +1,10 @@
 # Nagare
 
-The PlayStation 3 VSH's flowing waves and sparkles, recreated as a live desktop wallpaper: a Rust port of
+The PlayStation 3 VSH background, reverse-engineered, and slightly enhanced, as a live desktop wallpaper: a Rust port of
 `ps3xmbwave/`, the same wave, backdrop, post-processing and particles, on OpenGL 3.3 or Vulkan with an
 [egui](https://github.com/emilk/egui) settings panel. It is a rusty desktop port of the breakthrough research of
 [faquino/PlayStation-3-XMB](https://github.com/faquino/PlayStation-3-XMB) and
-[linkev/PlayStation-3-XMB](https://github.com/linkev/PlayStation-3-XMB). Nagare (流れ, a flow) is the product's name;
+[linkev/PlayStation-3-XMB](https://github.com/linkev/PlayStation-3-XMB) - without them, Nagare would be nada! Nagare (流れ, a flow) is the product's name;
 Sony's names are used only to say what it recreates. The executable is `nagare.exe` (the crate `nagare`). On Windows it
 starts as a live desktop wallpaper, behind the icons, with a tray icon to control it; elsewhere, and with `--window`,
 it is a window.
@@ -37,7 +37,9 @@ cargo run --release -- --renderer opengl     # drawn with OpenGL (Vulkan is the 
 lists everything.
 
 - **H** toggles the panel. The arrow keys send D-pad steps, and dragging shakes the virtual Sixaxis, as on the page.
-- **Poking** the scene - clicking it quickly, `pokesToOpen` times (9), no more than 0.8 s apart - opens the settings.
+- **Poking** the scene - clicking it quickly, `pokesToOpen` times (9), no more than 0.8 s apart and all within the poke
+  shield's radius (50 points) of the first - opens the settings; a click further off starts the count again, and a
+  press dragged out of that radius ends it, so clicking and dragging about the desktop never opens them.
   Each poke bounces the camera forward and back, half of `pokeBounce` (0.09) at the first and all of it from halfway
   on, and from the third on a hint says how many more it takes. Behind the icons, poke the desktop itself - a click
   on an icon is the icon's, and breaks the run (the icons' list view reports the item under the pointer as its hot
@@ -47,6 +49,18 @@ lists everything.
   times to show the settings.", with `pokesToOpen`'s count), whenever the settings, the intro and the epilepsy warning
   are not showing; clicking its × - in a window, or on the desktop behind the icons - or opening the settings by
   poking puts it away for good (the config keeps `pokeTipDismissed`). A `--test` run shows none.
+- **The poke shield** (`shield.rs`): the clicks still coming as the settings open by poking must not land on a knob.
+  So for a second the settings refuse clicks within 50 points of where the pointer was as they opened. A refused
+  click shows the shield - a circle, its place and size the very ones it refuses clicks in, bouncing, with "Click-block
+  activated" - and keeps refusing for 2.5 s from that click, the circle fading out as the time runs down; each refused
+  click starts the time again. The pointer leaving the circle ends it at once, the circle swelling as it fades away
+  over a quarter of a second. Clicks elsewhere go through.
+- **The scroll hint**: at the foot of the panel, "Scroll down to see more knobs!" and a bouncing arrow on a plain dark
+  pill, bobbing gently, while there are knobs below. The first scroll down, by the wheel or the bar, shows the user
+  knows, and puts it away for good (the config keeps `scrollHintDismissed`).
+- **One Nagare at a time** (`single.rs`): a second Nagare started with the same config - the Start menu's shortcut
+  clicked again, say - asks the running one to show its settings, and exits. Another config (`--config`) is another
+  Nagare, and `--test` runs are never held back.
 - **Streamer mode**: while a screen recorder or streaming program runs - OBS (`obs64.exe`, `obs32.exe`), Streamlabs,
   XSplit, Twitch Studio, vMix, Bandicam, Camtasia's recorder or Meld Studio, as `neighbour.rs`'s `RECORDERS` names
   them, looked for every two seconds - the panel hides the GPU's model behind a button, "Streamer mode ON: Click here
@@ -98,22 +112,26 @@ shows as off, and turning it on in the panel turns it back on there too.
 ## Software Update
 
 Nagare's only use of the network (`update.rs`, Windows only). Nothing is sent until the user agrees: a card on the
-scene, 8 s into the XMB's start, says that Nagare checks GitHub for a newer version every day or two and installs it,
-and that nothing about the user or the PC is sent. Its **OK**, or closing it, turns the checks on, and **No, don't
+scene, 8 s into the XMB's start, says that Nagare checks GitHub for a newer version every day or two and downloads it,
+then asks before installing it, and that nothing about the user or the PC is sent. Its **OK**, or closing it, turns the checks on, and **No, don't
 check** turns them off. Its buttons are caught as the poke tip's × is, behind the icons too. The panel's top row ends
-with **Software Update:**, an **Auto-check** box (which answers the card's question too), **Check now** and
+with **Software Update:**, the channel (**Stable**, the default, or **Latest release**: `updateChannel`, also under
+Resources > Software Update), an **Auto-check** box (which answers the card's question too), **Check now** and
 **Reinstall**, with a line under it saying what the updater did last, and when it next checks. The config keeps
 `updateConsent`, `updateAuto` and `updateNext`.
 
-**Reinstall** forces a download and install of the stable version whatever this copy is: the same version, to repair
-an install, or even a newer one, to go back to the stable release. It goes through the same checks as any update (the
+**Reinstall** forces a download and install of the channel's version whatever this copy is: the same version, to repair
+an install, or even a newer one, to go back to that release. It goes through the same checks as any update (the
 release key's signature, the installer's size and SHA-256), and, like them, installs only on a copy the installer
 installed.
 
 - **When.** A run's first check comes a random 1 to 60 minutes after the start, but never before the time the last run
   set. After a check comes a random wait of 24 to 48 hours, or 2 to 6 after a failure.
 - **What.** The tag in the repository's `update/stable.txt`, read from GitHub, names the release to update to
-  ([update/README.md](../update/README.md)). Each release carries `nagare-update.json`: the version, the installer's
+  ([update/README.md](../update/README.md)). On *Latest release* it is the newest release published (no draft, no
+  pre-release) instead: a HEAD request to `github.com/bungholesurfers/Nagare/releases/latest`, whose redirect to
+  `.../releases/tag/vX.Y.Z` carries the tag - only the redirect is read, no page, a few hundred bytes, on a host the
+  updater already uses and outside the API's rate limits. Each release carries `nagare-update.json`: the version, the installer's
   name, its size and its SHA-256. It is signed with Ed25519 by the release key, the release workflow's secret
   `NAGARE_UPDATE_KEY`, whose public half is in `signing.rs`. The manifest is believed only if that key signed it, it
   names the tag's version and an installer named for it, and that version is newer than this one. The installer is
@@ -128,16 +146,29 @@ installed.
     pinned updater would then stop updating, including the update that would fix it. The signature is what makes a
     download trustworthy, whatever happened to the connection.
   - The requests carry only a User-Agent naming Nagare and its version.
-- **Installing.** The installer is downloaded into `%TEMP%\nagare-update`, as VS Code's per-user setup downloads its own
-  into `%TEMP%`. A copy the installer installed then runs it silently, once nothing is full screen; the installer
-  stops Nagare, installs over it and starts it again. A copy that was not installed (a build, or the portable zip)
-  only says that a version is out, and links the releases' page.
+- **Installing, when you say so.** The installer is downloaded into `%TEMP%\nagare-update`, as VS Code's per-user
+  setup downloads its own into `%TEMP%`, and checked. Nothing is installed without the user's word:
+  - **A card on the scene**, with the installer's glass box, says that version X is downloaded and checked, its size,
+    and that installing closes Nagare for a few seconds and keeps the settings. It offers **Install now**, **Later**
+    (or ×: no more card this run; the next check brings it back) and **What's new** (the release's page, in the
+    browser). Its buttons are caught as the question card's are.
+  - **The panel's top** says the same, with **Install now** and **What's new** on the status line.
+  - **The tray icon's menu** gains an item at its top while an update waits - *Install Nagare 0.1.3*, or for a copy that
+    cannot install it *Nagare 0.1.3 is out: open its page* - and a notification tells of it once a run, the installer's
+    box beside its words.
+  - **`updateAutoInstall`** (Resources > Software Update, off by default) installs by itself instead, once nothing is
+    full screen, with no card.
+
+  Installing runs the installer silently; it stops Nagare, installs over it and starts it again.
+- **Portable copies.** A copy that was not installed (a build, or the portable zip) checks the same way, but never
+  downloads the installer: the card says that version X is out and opens its release page, and the panel's status line
+  links it.
 - **Loop guard.** Before an installer runs, `tried.txt` beside it names its version. A Nagare still older than that
   afterwards knows the install did not take, and Auto-check leaves that version alone (Check now can still try it).
   Once Nagare is that version, the folder is cleared away; the uninstaller removes it too.
 
 To test it without publishing anything:
-- `NAGARE_UPDATE_SOURCE=FOLDER` reads `stable.txt`, the manifest, its signature and the installer from a folder.
+- `NAGARE_UPDATE_SOURCE=FOLDER` reads `stable.txt` (or, on *Latest release*, `latest.txt`), the manifest, its signature and the installer from a folder.
 - `NAGARE_UPDATE_NOW=1` checks 5 s after the start, as if the card had been answered OK (with `--no-save`, nothing of it
   is kept); `NAGARE_UPDATE_NOW=force` makes that check a forced one, as Reinstall does. Neither variable is passed on
   to the installer.
@@ -192,11 +223,15 @@ sets. Saved besides the panel's values: the frame cap and the Resources tab's li
 
 ## The panel's top
 
-At the very top, the app's name, what it is, and whose research it stands on, with links. Clicking the name brings its
-gags: the first time ever, in order - a Naga-reeee that grows, Nagheenanajar, Naganna work here anymore!, Nagatoro,
-a legally distinct spline, then Claude Code's spinner words two a second, then the name again - and once that round is
-done, or in any later run (the config keeps `titleRandom`), in rounds at random: every gag once, shuffled, then the name
-again before the next round. Above the tabs: the graphics
+At the very top, the app's name, what it is, its home on GitHub (github.com/bungholesurfers/Nagare), and whose research
+it stands on, with links. Every link in the settings asks first: a prompt shows its address, with **Yes** (open it in
+the browser), **Copy to clipboard** and **No** (Escape, or a click beside it, too). Clicking the name brings its
+gags: the first time ever, in order - a Naga-reeee that grows, Nagheenanajar, Naga... ...Naganna work here anymore! HAH, Nagatoro,
+a legally distinct spline mesh, then Claude Code's spinner words two a second, then the name again - and once that round
+is done, or in any later run (the config keeps `titleRandom`), in rounds at random: every gag once, shuffled, then the
+name again before the next round. Whenever the settings appear - the panel shown, or their window opened - the title
+greets with a gag at random for 2 s, then slides up out of its line, on a sharp ease-in (slow to start, then quick),
+as the name slides up into it from below. Above the tabs: the graphics
 API and renderer as the driver reports them (and, in amber, why it is not the one asked for, if Vulkan could not
 start); the clock the scene reads (the local time,
 or the override) and the moment the backdrop was last handed, which Theme Settings' Colour, the XMB's start and the
@@ -210,8 +245,16 @@ The cap is on at 60 by default, and 6 at the least; the config keeps it, or 0 fo
 the display's next refresh (swap interval 1). With a cap that divides the
 refresh rate, such as 60 on a 240 Hz display, each frame waits for that many refreshes (swap interval 4), so every
 frame lasts exactly as long. Any other cap is kept by a timer with vsync off: a deadline one period after the last,
-slept towards and spun for its last 1.5 ms. The previous version slept a period from each frame's start, then waited
+slept towards and spun for its last 0.8 ms: std's sleep on Windows is a high-resolution waitable timer, which woke at
+most about 0.6 ms late here whatever the system timer resolution (measured with it at 15.6 ms, 2026-10-28), so raising
+the resolution (`timeBeginPeriod`) would buy nothing but more wake-ups system-wide; the spin was 1.5 ms, from 2 ms out.
+The perf overlay shows the resolution and the spin. The previous version slept a period from each frame's start, then waited
 for the next refresh as well, so frames came out four or five refreshes long and averaged 57 to 58.
+
+Each frame asks for the next as it is drawn, as well as from winit's `about_to_wait`: in Windows' modal loops - a
+window dragged, the tray icon's menu open, a caption button's tooltip - messages are still dispatched, so `WM_PAINT`
+still comes, but the loop never comes back to `about_to_wait`, and the scene stood still until the loop ended (a
+window held in its keyboard move for 3 s: a 3,002 ms frame before, 18.5 ms after).
 
 On Windows nothing is drawn while no one can see it: while the session is locked or its display is off
 (`presence.rs`, from the system's own notifications), the loop just waits; the Resources tab adds the other programs'
@@ -233,9 +276,11 @@ it is given to, without changing what the config keeps.
 identities and driver versions, against what `machine.json` (beside the config, apart from it) last saw; so at the first
 start too - the **benchmark** runs: behind the icons, every window minimized first (as Windows + M does), the scene is
 drawn as it always is, uncapped and unseen, under a black screen of the console's dialogs - two lines across the screen,
-and between them what is going on and a progress bar. It starts black, then from 2 s lets the scene
-through slowly, on an ease-in over 6.5 s, blurred as under the epilepsy warning (`epilepsyWarningBlurPx`), and from 3.5 s lets the blur go over
-2.5 s (all of these halved when short); as the result comes, the black (on an ease-in, lingering then going) and the blur come back together over a second.
+and between them what is going on and a progress bar. It starts black and lets the scene through over half a second,
+blurred as under the epilepsy warning (`epilepsyWarningBlurPx`), the blur going over the same half second; the scene
+itself comes in slowly under it, by the XMB's own fade - the background hidden at once and shown again, as
+`backgroundFadeMs` times it, but over 9 s (4.5 s when short), whatever that setting holds. As the result comes, the
+black (on an ease-in, lingering then going) and the blur come back together over a second.
 The scene it draws is its own: midnight on 1 January 2007, whatever the clock, with no music theme, no Season Pass and
 no Theme Settings' Colour or Brightness (the music let go at once as it begins, and back afterwards as it always comes), and maru-chan sailing across in 13 s
 (6.5 when short), music or not - the settings themselves untouched - until its screen is black again, when his voyage ends. The blur's radius grows and
@@ -275,11 +320,15 @@ but with `--first-start`.
 ## Perf overlay
 
 `--perf-overlay N` or the panel's buttons. The overlay draws itself last, with its own egui context and painter, so its
-cost is timed apart from everything else and shown with the frame's.
+cost is timed apart from everything else and shown with the frame's. Where the frame is too short for it, the whole
+overlay is drawn smaller, in steps down to 60 %: a step down as soon as it does not fit, a step back up only once the
+larger one has had 6 % to spare for a second, so that an overlay at the edge, whose height moves a line or two, does
+not flick between two sizes.
 
 1. The frame time and rate, averaged over the last half second, the overlay's own CPU and GPU time, and the graphics
    line the panel shows (the API, the driver, and where the spline mesh is built: `spline mesh on GPU (f64)` and the like).
-2. The frame's spread, the pacing, and three tables:
+2. The frame's spread, the pacing, the system's timer resolution (now and its finest, by `NtQueryTimerResolution`)
+   with how long the frame cap's wait spins a frame, and three tables:
    - each stage's time on the main thread (the scene's sets; listening - the music's response and the sub-frames; the
      wave's simulation and draw; the particles' simulation and draw; the panel; the overlay; the swap, mostly waiting
      for the display; and the frame cap's sleep). The stages that draw only record the GPU's work, which the next
@@ -310,7 +359,8 @@ cost is timed apart from everything else and shown with the frame's.
    the bass goes. The boat stays where it floats, the waves passing under it. On each kick it nods nose up, as far as
    the kick is strong, its funnel squashing, and a note rises beside it every other kick; it trembles with the bass
    at subShake's rate, and blows steam with it, the more the louder; its face blinks, squints on a kick and sings
-   when it is loud. The moon glows with the bass and sways its head a little on the beat, left then right. Not listening - the music theme off - it sleeps at anchor, z's rising from
+   with heavy bass - its mouth open once the bass's level is over a half, the wider the further over and the lower
+   the bass, widest at 45 Hz and under, a third of that at 100 Hz and over (`maru::mouth`, the scene's boat's too). The moon glows with the bass and sways its head a little on the beat, left then right. Not listening - the music theme off - it sleeps at anchor, z's rising from
    its funnel. *maru-time*, in its corner, is what drawing it takes on the CPU (a few hundredths of a millisecond).
 3. A graph of the last 300 frames, between the tables and the rest: each frame's interval, the CPU's work, the GPU's
    total and the overlay's own CPU.
@@ -470,9 +520,9 @@ after the start; the panel's values are left as they are. It aims towards `aeHig
 the composite draws with the sum. Its knobs and reading are on the Post tab, above the tone curve. How the peak is
 measured:
 
-- `aeSource`: *The final frame* (the default) meters what goes to the screen - the glare or the bloom and the tone
+- `aeSource`: *Final frame* (the default) meters what goes to the screen - the glare or the bloom and the tone
   curve with it - before the particles: under OpenGL a copy of the window's frame, under Vulkan the canvas itself.
-  *Before the glare* meters the composite, as AE did before; the glare it does not see can carry the highlights past
+  *Before glare* meters the composite, as AE did before; the glare it does not see can carry the highlights past
   the target.
 
 - `aeMetering`: a pixel's brightness is its brightest channel (no channel clips) or its luminance (Rec. 709; the default).
@@ -553,12 +603,16 @@ fills again. The simulation's cost grows with it, on one core.
 
 ## Maru-chan
 
-**maruChan** (on by default; the Maru-time tab) puts Nagare-maru, the perf overlay's steamboat, into the scene as a
+**maruChan** (on by default; the Maru-time, etc. tab) puts Nagare-maru, the perf overlay's steamboat, into the scene as a
 little 3D boat (`maru.rs`) that now and then sails the wave across the screen, from off its left edge to well off its right
 (six tenths of the screen's half-width past it, so that it and its smoke are gone before it is), at the speed that
-crosses the screen in `maruCrossSec` (30 s); `maruSizePx` (95, up to 420) pixels long wherever it floats. Its first voyage comes `maruFirstMin`
+crosses the screen in `maruCrossSec` (30 s); `maruSizePx` (95, up to 420) pixels long wherever it floats. It rides the
+highest of the wave's lines where it is across the screen, the wave's top edge; `maruRideDepth` (0) lowers it that
+share of the way down to the lowest, 1 its bottom edge, its buoyancy and tilt following the same line. Its first voyage comes `maruFirstMin`
 (0.5) minutes after it is switched on, or after the app starts with it on, then one every `maruEveryMin` (0.5) minutes
-from the end of the last; with `maruMusicOnly` (on) a voyage that comes due waits for the music theme. **Sail now** sends
+from the end of the last. Under the music its first comes `maruMusicFirstMin` (0.5) minutes after the music begins,
+then one every `maruMusicEveryMin` (0.5) minutes, and when the music ends the next comes `maruEveryMin` after it; the
+music's coming and going changes only a wait, never a voyage under way; with `maruMusicOnly` (on) a voyage that comes due waits for the music theme. **Sail now** sends
 it at once.
 
 - The model is made at start in the 2D boat's own proportions - its outlines drawn out into slabs with rounded rims:
@@ -570,7 +624,8 @@ it at once.
 - Where it floats is read off the wave each frame, from the vertices the particles are emitted from: where the wave's
   lines cross its place across the screen, its height is the highest of them and its distance the middle of their
   band, both eased, with a slow bob and roll.
-- Of the 2D boat it keeps the face - blinking, squinting at a kick, singing when it is loud; the bass moves it up and
+- Of the 2D boat it keeps the face - blinking, squinting at a kick, singing with heavy bass, its mouth the wider the
+  lower the bass, as the 2D boat's; the bass moves it up and
   down at subShake's rate. Its smoke is soft sprites, broken by noise, rising, swelling and drifting back, faster and
   more the louder the bass, and a burst when heavy bass comes in all at once (as the 2D boat's does); `maruSteam` (7, up to 69)
   scales it.
@@ -609,47 +664,104 @@ it at once.
 
 ## Disco ball
 
-**discoBall** (off; the Maru-time tab) brings a mirror ball down once the music theme has played heavy bass for
-`discoAfterMin` minutes (7): bass louder than `discoBassLevel` (0.69) while the visualizer listens adds up, anything
-else drains it at half the pace. It is lowered on its chain over `discoDescendSec` (30 s), easing in, at `discoX` of the
-screen's width from the left (0.667: a third of the width in from the right), swings on it - a pendulum of about three
-seconds, nudged by each kick - spins at `discoSpin` turns a second, and hangs there until the music ends, when it is
-drawn back up. Drop now on the tab lowers it at once, until the music next ends. It needs the music to be heard: one of
+**discoBall** (on; the Maru-time, etc. tab) brings a mirror ball down once the music theme has played heavy bass for
+`discoAfterMin` minutes (0.5): bass louder than `discoBassLevel` (0.42) while the visualizer listens adds up, anything
+else drains it at half the pace - or, with `discoWithMusic` (off), as soon as the music theme starts. Once down it
+stays down, whatever the bass, until the music ends; should the music come back while it is still going up, it comes
+straight back down - the bass is asked for again only once it is all the way up. It is lowered on its cable over `discoDescendSec` (42 s), at an even pace, as a
+motor winds it, at `discoX` of the screen's width from the left (0.67: about a third of the width in from the right),
+swings on it - a pendulum of about three seconds, nudged by each kick - spins at `discoSpin` turns a second (0.015),
+and hangs there until the music ends, when it is drawn back up over `discoRiseSec` (42 s), as evenly. Drop now on the tab lowers it at once, until the music next ends. It needs the music to be heard: one of
 the visualizer's effects on.
 
-- The ball (`discoSizePx`, 84 px across, up to 256) is no mesh: `disco.rs` draws it per pixel over its box, working out the
+- The ball (`discoSizePx`, 84 px across, up to 256; supersampled at `discoBallSupersample`, 4x by default, as
+  maru-chan is: its shading worked out at n x n points a pixel and averaged, its edges softened over a sample) is no mesh: `disco.rs` draws it per pixel over its box, working out the
   sphere under each pixel - flat (`discoFlat`, on), seen square on with its rows of tiles level as an icon is, or seen
   from below as it hangs above the eye - turned by its spin, and finding the tile the pixel falls on. The tiles are laid
-  in 16 rows, fewer round the rows nearer the poles, as real ones are; each is flat, set a hair askew as glued glass is
+  in 50 rows (`discoTileSize` 0.32; at 1 they are about three times the size, 16 rows, and the spots grow and shrink
+  with them), fewer round the rows nearer the poles, as real ones are; each is flat, set a hair askew as glued glass is
   and faintly smudged, and shows one reflection: the frame as a fish-eye sees it, mixed with the frame turned upside
   down, so that a dark lower screen does not darken the ball's lower half, and in the tiles that look down a lit dance
-  floor (`discoFloor`, off by default) that the ball alone reflects. Between them, sized as a share of the tiles - so that a small ball
-  has fine gaps - is the dark adhesive they are set in, each tile's edge a bevel catching the light. The chain's cap
-  lies behind the ball, half of it showing.
-- Two lights shine on it from the eye's side: a warm white key from above, and one of the particles' iridescent colours
-  from the right. With a sure beat (`discoBeatLights`, off by default), the lights flash on each beat, the coloured one takes the
-  palette's next colour, the key swings to the other side - the glints jumping with it - and the floor changes.
+  floor (`discoFloor`, 1) that the ball alone reflects. Between them, sized as a share of the tiles - so that a small
+  ball has fine gaps - is the dark adhesive they are set in, each tile's edge a bevel catching the light. The glass -
+  what it reflects and the lights it catches - is taken to `discoGlassGamma`'s power and times
+  `discoGlassBrightness` (1.3 and 3, up to 4), over the adhesive, and `discoSheen` (1, up to 10) adds a soft light at grazing angles round
+  its edge, as Blender's Principled BSDF's Sheen does, lit the more the key light lies behind the edge.
+- It hangs from a cable of glossy pearl plastic, round across: dim where it faces the eye, bright at its edges by its
+  fresnel, with a faint rainbow in the rim as the XMB's glass has, and a long highlight down it on the key light's side;
+  its cap, a little dome of the same plastic, lies behind the ball, half of it showing.
+- **What lights it** is `discoLight`:
+  - **Studio lights & the sun** (the default): the studio's two lights below and the sun besides, all three lighting
+    the ball and sending out its spots and beams.
+  - **The sun**: the backdrop's sun. `back_colours0` sends a small glow round an ellipse once a day, at
+    angle (`_DayTime` - 600) π / 1200: up the left in the morning, over the top at noon, down the right in the evening,
+    below the screen at night. The ball is lit by a far light behind the scene, through that place on the screen. The
+    clock is the backdrop's, so the overridden clock and Season Pass move it too; the music's backdrop draws no sun,
+    but it is still there.
+  - **The particles' light**: the spot light the sparkles are lit by (`spotPosX`, `Y`, `Z`), where it stands in the
+    world, the ball set in the same world the camera sees.
+  - **Studio lights**: a warm white key from above and one of the particles' iridescent colours from the right.
+
+  With a sure beat (`discoBeatLights`, 2, up to 4), the lights flash on each beat where they stand - none of them
+  moves - the coloured one takes the palette's next colour, and the floor changes. Under the sun alone or the
+  particles' light, the coloured light only tints the ball, faintly, and sends nothing out.
 - Its light is worked out on the CPU from the very tiles the shader draws, their tilts too: through a hazy room
-  (`discoBeams`), the key's beam onto the ball and the beams a quarter of its lit tiles send back out, drifting fog in
-  them; the spots they throw onto the scene behind (`discoSpots`, off by default); and over the ball the glints
-  (`discoGlare`) - a star of eight rays, the long four with a rainbow's fringe - on the seven tiles that flash
-  brightest, twinkling, and a soft glow that swells with them. The beams and spots go under the ball, the glints over.
+  (`discoBeams`, 0.15), the light's beam onto the ball and the beams its tiles send back out, drifting fog in them with a
+  faint grain from frame to frame, as motes catch the light - down to where one beam in seven meets the wave, and out
+  into the air from one reflection in thirty that misses it; and over the ball the glints (`discoGlare`) - a star of eight rays, the long four with a rainbow's fringe -
+  on the seven tiles that flash brightest, twinkling, and a soft glow that swells with them. Each light's glints are
+  its own share of discoGlare: `discoGlareKey` (the studio's key, or the particles' light; 1), `discoGlareColour`
+  (the coloured light; 1) and `discoGlareSun` (0.15, a far light).
+- **The spots** (`discoSpots`, 0.2 of 0 to 1, a quarter of it taken as their brightness) are light on the wave, as a game lights a scene with a spot light's pattern. They
+  come from a finer tiling of the ball, 60 rows at a `discoTileSize` of 1, about 4,600 tiles as a real ball has, each a
+  hair askew; smaller tiles make it finer - 188 rows, about 45,000 tiles, at the default 0.32, and up to 240 rows at
+  0.25 - as many spots as tiles, each smaller. The ball is
+  set in the world the wave and the particles are seen in (the eye at (0, 0, 2) looking down -z, 53° up and down), 0.75
+  from the eye, the wave some ten units further. Each lit tile's reflection is a beam, the tile's square in
+  cross-section, spread by the light's own size; each frame the beams are drawn on the GPU, as a little rounded square
+  each, into the pattern the ball projects (1024 × 1024, half floats) - every tile an instance, laid once for its
+  tiling with its tint under each light, which a vertex shader turns with the ball, reflects each light off and sees
+  from the ball, drawing nowhere a tile the light does not reach or whose beam misses - through a frustum from the ball round the wave - its
+  surface read from every eighth of its vertices, 16 by 16 quads in the world. Then the wave's mesh is drawn again over
+  the frame, each pixel's place in the world worked back from the clip space it comes in, lit by that pattern and
+  falling off with the distance's square (against the distance to the wave's middle). The wave is a thin, misty
+  sheet: it scatters the light back from either side as its face turns to it, lets it through towards the eye, shows
+  more of it seen edge on, where its mist lies deeper along the eye's line, and carries it a little way on inside, a
+  soft glow round each square (the pattern read along a golden-angle spiral). So a spot lies on the wave exactly as
+  its surface takes it, on every fold the beam passes through, stretched where it glances and squeezed where the wave
+  turns away. The CPU follows only a sample of the tiles, as large whatever their size, for the beams through the
+  haze and the spots in the air.
+- A reflection also lands, small, on a plane at the wave's middle depth, as a sprite seen only on maru-chan (her box
+  on the screen) and, as far as `discoSpotsAir` lets it (0, none, by default), on the backdrop. As the ball spins, the
+  spots sweep across the wave. The ball's light costs about 0.7 ms of the CPU a frame and 0.35 ms of the GPU at
+  720p (the defaults, three lights), only while it is out.
+- The beams and spots go under the ball, the glints over.
 - The perf overlay's steamboat has one too, while the scene's is out: hanging from the top of its sky by the moon,
   spinning, sparkling, with spots about it. The overlay shows the scene's as the *Disco ball* pass.
 
 ## Season Pass
 
 **seasonPass** (the Backdrop tab; *In order* by default) is the app's own tour of the months' backdrops, in place of the
-clock's month (`scene::SeasonPass`): each month's colours for `seasonPassHoldMin` (2) minutes, as on its 1st at the clock's own hour - the backdrop
+clock's month (`scene::SeasonPass`): each month's colours for `seasonPassHoldMin` (4.2, at least 3) minutes, as on its 1st at the clock's own hour - the backdrop
 brings the next month up the screen as a month goes by, so that only at its start does a month show its own colours alone -
-then the next fades in over `seasonPassFadeSec` (20) - *In order*, the calendar's, or *Shuffled* - among the months
-its toggles pick (`seasonPassMonths`, as bits, all by default). It begins on the clock's month, or the first picked
-after it. The fade is the backdrop's own ease from one moment to the next, handed the new month with that length, the
+then the next fades in over `seasonPassFadeSec` (42, at least 30) seconds - *In order*, the calendar's, or *Shuffled* - among the months
+its toggles pick (`seasonPassMonths`, as bits, all by default). It begins on `seasonPassStart`'s month - *The clock's
+month* by default, or any month chosen, in order or shuffled, a change beginning the tour again there - or the first
+picked after it. The fade is the backdrop's own ease from one moment to the next, handed the new month with that length, the
 clock's ticks left alone until it is done. It runs wherever the clock's colours show - the scene at rest, or the music
 keeping them (`musicColourChoice`'s Normal color) - while the XMB's start and a content's boot keep their own moments, and Theme
 Settings' Colour, a month held, wins. Its section shows a swatch of each month, in two rows of six - its day's texture over its night's,
-evaluated from the fits - each a toggle, the one showing outlined, and a line saying what the tour is doing: the month
+evaluated from the fits - each a toggle, the one showing glowing white as it breathes (a second up, a second down) with a play mark on it, and a line saying what the tour is doing: the month
 shown and the next (chosen ahead, shuffled too) with the time left, the fade under way, or what holds the colours instead.
+
+## The start
+
+**startTransition** (the Scene tab's Start, the first of its enhancements) chooses how the scene comes in as Nagare starts. *XMB start* (the default)
+is the console's: the wave and the sparkles coming in under the light of 10:00, before the background the user chose
+takes over, as it did once a user was loaded. *Background fade* shows the scene as the user chose it at once, faded in
+from black as the background is shown again - the XMB's own transition - over `backgroundFadeMs`. It is read from the
+config (or `--set`) before the first frame, and it applies wherever the start plays again: after the epilepsy
+warning, the benchmark or the card.
 
 ## Epilepsy warning
 
@@ -727,9 +839,15 @@ section folds. The **Panel** tab holds its look:
   - show only with **the scene**.
 - `windowTheme` (Windows' materials): their shade and the frame's, **Dark** or **Light** (the panel stays dark, so
   light text over a light material reads less well). `acrylicOpacity` (Acrylic (always)): how much of that shade
-  tints its blur. `windowCorners`: the settings window's corners - the system's, round, slightly round or square.
+  tints its blur. `windowCorners`: the settings window's corners - the system's, round, slightly round or square (the default).
 - `uiScale`: the settings' size, over the display's scale, 0.5 to 2. The settings' text is whiter than egui's dark
   theme, with a soft drop shadow (the perf overlay, a context of its own, has none).
+
+Its buttons are square, as the PSP's are, and whatever is chosen - a tab, a selected button, selected text - is lit
+as the PSP lights its choice: a pale bar, lighter at its top, with a fine light edge and a brighter line along its top.
+egui fills a chosen thing with an odd grey no other shape has, and the pass that adds the text's shadows paints the
+highlight over each rectangle of it. Hovered, a button gets a fine light edge; pressed, it is paler. The tabs are set
+in Segoe UI Semibold (egui's own font where Windows' is missing), each in a faint square frame.
 
 The blur (`blur.rs`) is the dual filter: once the scene is drawn it is copied at half size and halved a few times,
 five taps a pass, then doubled back, eight taps a pass - so a wide blur costs a few small passes - and egui is laid
@@ -817,14 +935,16 @@ one it shows - wgpu's frame latency of 2, three images in the swap chain - so th
 frame's time still comes on time, at the cost of that frame in latency; off, the latency is 1. Auto (the default) keeps
 it on while the frame rate is 30 or more and off below 20, where a queued frame would make the settings slow to answer.
 It acts only while frames wait for the display (no cap, or a cap at the refresh rate): a lower cap paces each frame
-itself, with time to spare. OpenGL's buffering is the driver's.
+itself, with time to spare. OpenGL's buffering is the driver's. **tripleBufferingMusicOff** (Yes; shown while
+tripleBuffering is On or Auto) turns it off while the music theme plays, so that what the music moves - the wave's
+brightness, the camera's bounces - comes a frame closer to what is heard.
 
 **renderScale** (Resources, 0.25 to 1) draws the scene smaller and stretches it over the window, for a GPU - or a CPU -
 that cannot keep up: under OpenGL into the frame's lower left, copied out and stretched (`antialias::Upscale`), under
 Vulkan into a canvas that much smaller (it multiplies `supersample`). The panel, the warning and the intro are drawn at
 the window's full size. **softwareLite** (on by default) leaves the heavier features out while the software renderer
 draws, chosen or fallen back to, without touching their settings: supersampling, maru-chan's supersampling, motion blur
-and scene light, the disco ball's beams and floor, sharpening, FXAA, the settings' blur, renderScale above 0.5, and gpuWave (the spline mesh built on the CPU). The
+and scene light, the disco ball's supersampling, beams and floor, sharpening, FXAA, the settings' blur, renderScale above 0.5, and gpuWave (the spline mesh built on the CPU). The
 panel strikes those settings through and says so at its top.
 
 **When one fails.** The renderer asked for is tried first, then the others in turn: Vulkan, OpenGL, software. A
@@ -905,12 +1025,12 @@ seconds, not the wall's.
 | `--test-date T`    | The date and time the scene starts at, as `2026-01-10T07:00:00`.                           |
 | `--test-dt S`      | The seconds each frame moves the clock on.                                                 |
 | `--size WxH`       | The window's size in pixels.                                                               |
-| `--set KEY=VALUE`  | Sets any numeric setting by its panel name (`glareMode=0`, `tonemap=2`), as if by hand.    |
+| `--set KEY=VALUE`  | Sets any numeric setting by its panel name (`glareMode=0`, `tonemap=2`), as if by hand; `musicPlaying=1` sets the scene's music playing, as the panel's Music does (for the music theme, the disco ball). |
 | `--shot SEC=FILE`  | Saves the frame drawn at that scene time as a PNG (the scene, and the panel with `--ui`, without the overlay). Repeatable. |
 | `--exit-after SEC` | Exits at that scene time.                                                                  |
 | `--report FILE`    | On exit, writes each stage's CPU time and each pass's GPU time (mean, median, 95th and 99th percentiles, worst), the process's CPU time and each thread's, and each frame's interval and stages (`each_frame`, where a spike lands), as JSON, and prints a summary. |
 | `--warmup SEC`     | The scene seconds left out of the report at the start (1).                                 |
-| `--set-at SEC:KEY=VALUE` | Sets one at that scene time, as the panel would (`renderer=1` switches to Vulkan mid-run). Repeatable. |
+| `--set-at SEC:KEY=VALUE` | Sets one at that scene time, as the panel would (`renderer=1` switches to Vulkan mid-run; `musicPlaying` too). Repeatable. |
 | `--renderer API`   | Draws with Vulkan, OpenGL or software.                                                     |
 | `--ui`             | Shows the panel in a test.                                                                 |
 
@@ -927,9 +1047,11 @@ the main thread for the CPU and the numbers wander.
 
 ### Build and PGO
 
-The release profile uses thin LTO over 16 codegen units: a change rebuilds in about 32 s, against 110 s with fat LTO
-and one unit, for a few percent of the CPU's frame time (rust-lld linked slower here, 79 s, and was left out).
-The PGO builds set fat LTO and one unit for themselves (`CARGO_PROFILE_RELEASE_*`), so a release keeps the last few
+The release profile is for working on Nagare: no LTO, 16 codegen units and incremental compilation. Rebuilding after
+an edit to `main.rs` takes about 4 s, against 12 s without incremental compilation and 54 s with the thin LTO it
+used before (measured 2026-10-28), for some of the CPU's frame time; the images are the same to the byte. (rust-lld
+linked slower here, and was left out.) The PGO builds set fat LTO, one unit and no incremental compilation for
+themselves (`CARGO_PROFILE_RELEASE_*`), so a release keeps the last few
 percent. `cargo xtask pgo` builds with profile-guided optimisation:
 1. an instrumented build (`cargo xtask pgo-instrument`);
 2. twelve `--test` runs with it, through both glare modes, every tone curve, auto exposure, the noise, the

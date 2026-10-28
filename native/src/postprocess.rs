@@ -907,6 +907,13 @@ impl PostProcess {
         }
     }
 
+    /// The wave's light buffer as the composite reads it - the sub-frames' sum while motion-blurred - and its scale,
+    /// one over the sub-frames, for the disco ball's spots.
+    pub fn wave_light(&self) -> Option<(glow::Texture, f32)> {
+        let wave = if self.subframes > 1 { self.wave_sum.as_ref() } else { self.wave.as_ref() };
+        wave.map(|w| (w.tex, 1.0 / self.subframes as f32))
+    }
+
     /// Runs the passes and leaves the result in the window's framebuffer, at `width` x `height`, for the particles to
     /// draw over, with the colours dimmed by the renderer's fade and the tone curve times _Gamma. The exposure is the
     /// settings' plus what auto exposure adds, which runs on the GPU; the glare is the console's or, as `native` asks, the

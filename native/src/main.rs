@@ -41,7 +41,9 @@ mod presence;
 mod scene;
 mod settings;
 mod settings_window;
+mod shield;
 mod signing;
+mod single;
 mod sharpen;
 mod sim;
 mod spline;
@@ -205,16 +207,112 @@ fn load_processes(saved: Option<&serde_json::Value>, n: &NativeSettings) -> [Str
 /// The benchmark's maru-chan crosses the screen in this many seconds, a little longer than the benchmark's 10 (half,
 /// in the 5 of the short one).
 const BENCH_MARU_SEC: f64 = 13.0;
+/// The benchmark's scene comes in by the XMB's fade, the background shown again, over these milliseconds: the short
+/// run's, then the long one's - nearly the whole of the measuring.
+const BENCH_FADE_MS: [f64; 2] = [4500.0, 9000.0];
 
 /// The moment the benchmark draws: midnight on New Year's Day, 2007.
 /// The smallest blur the settings' blur draws, in points: what one pass at half the size blurs, however small the
 /// radius asked for.
 const BLUR_FLOOR: f64 = 3.0;
 
+/// What a click on a card's button does.
+#[derive(Clone, Copy, Debug, PartialEq)]
+enum CardHit {
+    /// Software Update's question: OK (or ×), and No.
+    Yes,
+    No,
+    /// The update card: Install now, Later (or ×), and What's new (or, for a copy that cannot install, the release page).
+    Install,
+    Later,
+    Notes,
+}
+
+/// The update card's version, and the installer's size in bytes once downloaded (None: out, but not to be installed
+/// by this copy).
+struct UpdateCard {
+    version: String,
+    size: Option<u64>,
+}
+
+/// The installer's glass box (installer/theme, nagare-customize's), which the cards about Software Update show.
+const UPDATE_LOGO: &[u8] = include_bytes!("../installer/theme/box-128.png");
+
+/// A card at the top of the scene, in the middle: the installer's box beside a title, words and a row of buttons, the
+/// first of them stressed, and a × doing what `close` does. Returns where its buttons and × lie, in the window's
+/// pixels at `scale`, for `card_click`, which catches their clicks as the poke tip's × is caught.
+fn card(
+    ctx: &egui::Context,
+    scale: f64,
+    logo: Option<&egui::TextureHandle>,
+    title: &str,
+    body: &str,
+    buttons: &[(&str, CardHit)],
+    close: CardHit,
+) -> Vec<(CardHit, (f64, f64, f64, f64))> {
+    let ink = |a: u8| egui::Color32::from_white_alpha(a);
+    let rect = |r: egui::Rect| {
+        let r = r.expand(3.0);
+        (r.min.x as f64 * scale, r.min.y as f64 * scale, r.max.x as f64 * scale, r.max.y as f64 * scale)
+    };
+    let button = |ui: &mut egui::Ui, text: &str, strong: bool| {
+        egui::Frame::new()
+            .fill(egui::Color32::from_white_alpha(if strong { 60 } else { 28 }))
+            .corner_radius(5.0)
+            .inner_margin(egui::Margin::symmetric(14, 5))
+            .show(ui, |ui| ui.label(egui::RichText::new(text).size(13.0).color(ink(235))))
+            .response
+            .rect
+    };
+    egui::Area::new(egui::Id::unique(title))
+        .anchor(egui::Align2::CENTER_TOP, egui::vec2(0.0, 24.0))
+        .order(egui::Order::Foreground)
+        .interactable(false)
+        .show(ctx, |ui| {
+            egui::Frame::new()
+                .fill(egui::Color32::from_black_alpha(200))
+                .corner_radius(8.0)
+                .inner_margin(egui::Margin { left: 12, right: 8, top: 8, bottom: 12 })
+                .show(ui, |ui| {
+                    ui.horizontal_top(|ui| {
+                        if let Some(logo) = logo {
+                            ui.add(egui::Image::new(logo).fit_to_exact_size(egui::vec2(64.0, 64.0)));
+                            ui.add_space(6.0);
+                        }
+                        ui.vertical(|ui| {
+                            ui.set_max_width(430.0);
+                            let x = ui
+                                .horizontal(|ui| {
+                                    ui.label(egui::RichText::new(title).size(14.0).strong().color(ink(240)));
+                                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                                        ui.label(egui::RichText::new("×").size(21.0).color(ink(220))).rect
+                                    })
+                                    .inner
+                                })
+                                .inner;
+                            ui.label(egui::RichText::new(body).size(12.5).color(ink(220)));
+                            ui.add_space(6.0);
+                            let mut hits = vec![(close, rect(x))];
+                            ui.horizontal(|ui| {
+                                for (i, (text, hit)) in buttons.iter().enumerate() {
+                                    hits.push((*hit, rect(button(ui, text, i == 0))));
+                                }
+                            });
+                            hits
+                        })
+                        .inner
+                    })
+                    .inner
+                })
+                .inner
+        })
+        .inner
+}
+
 /// Software Update: how long into the XMB's start the card asking about it waits, what it says, and the random
 /// waits, in seconds: before a run's first check, between checks, and after a check that failed.
 const CONSENT_AFTER: f64 = 8.0;
-const CONSENT_TEXT: &str = "Nagare checks GitHub for a newer version every day or two, and installs it for you. Nothing about you or your PC is sent, only the request itself. You can turn this off at any time in the settings, under Software Update.";
+const CONSENT_TEXT: &str = "Nagare checks GitHub for a newer version every day or two and downloads it, then asks you before installing it. Nothing about you or your PC is sent, only the request itself. You can turn this off at any time in the settings, under Software Update.";
 const UPDATE_FIRST: (f64, f64) = (60.0, 3600.0);
 const UPDATE_EVERY: (f64, f64) = (24.0 * 3600.0, 48.0 * 3600.0);
 const UPDATE_RETRY: (f64, f64) = (2.0 * 3600.0, 6.0 * 3600.0);
@@ -304,12 +402,14 @@ const POKE_HINT_FROM: u32 = 3;
 const POKE_BOUNCE_SEC: f64 = 0.3;
 
 /// Clicks on the scene counted towards opening the settings: how many in a row, when the last was, and where, in the
-/// scene window's pixels, for the hint; and how far the last one bounces the camera.
+/// scene window's pixels, for the hint; where the run's first was, which the rest must land near; and how far the last
+/// one bounces the camera.
 #[derive(Default)]
 struct Poke {
     count: u32,
     last: f64,
     at: (f64, f64),
+    from: (f64, f64),
     bounce: f64,
 }
 
@@ -345,18 +445,56 @@ impl Pacing {
 
 /// Sleeps until `deadline`: the system's sleep for all but the last 1.5 ms, which it may overshoot, then a spin.
 fn sleep_until(deadline: Instant) {
+    let mut spun = Duration::ZERO;
     loop {
         let now = Instant::now();
         if now >= deadline {
-            return;
+            break;
         }
         let rest = deadline - now;
-        if rest > Duration::from_micros(2000) {
-            std::thread::sleep(rest - Duration::from_micros(1500));
+        if rest > SPIN_MARGIN + Duration::from_micros(100) {
+            std::thread::sleep(rest - SPIN_MARGIN);
         } else {
             std::thread::yield_now();
+            spun += now.elapsed();
         }
     }
+    SPUN_NS.fetch_add(spun.as_nanos() as u64, std::sync::atomic::Ordering::Relaxed);
+}
+
+/// Where the backdrop's sun is, on the screen's 0..1 from the bottom left, at the moment the backdrop shows: the small
+/// glow back_colours0 sends round an ellipse once a day (docs/background/program.md), at angle (`_DayTime` - 600) pi /
+/// 1200 - up the left in the morning, over the top at 1200, down the right in the evening, below the screen at night.
+/// The day's clock is worked out as the backdrop's, whatever the backdrop draws (the music's draws no sun).
+fn backdrop_sun(s: &WaveSettings, date: &NaiveDateTime) -> [f32; 2] {
+    let c = backdrop::uniforms(s, date, 0).day_time;
+    let theta = (c - 600.0) * std::f64::consts::PI / 1200.0;
+    [(0.5 - 0.8 * theta.cos()) as f32, (0.99 * theta.sin()) as f32]
+}
+
+/// How far before a deadline `sleep_until` stops sleeping and spins: std's sleep is a high-resolution waitable timer on
+/// Windows, which woke at most about 0.6 ms late here whatever the system timer resolution (measured 2026-10-28, the
+/// resolution at its coarsest 15.6 ms); the spin covers that. It was 1.5 ms, spinning from 2 ms out.
+const SPIN_MARGIN: Duration = Duration::from_micros(800);
+
+/// How long `sleep_until` has spun since the overlay last took it, in nanoseconds.
+static SPUN_NS: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+
+/// The system's timer resolution now, and its finest, in milliseconds (NtQueryTimerResolution); None elsewhere.
+#[cfg(windows)]
+fn timer_resolution() -> Option<(f64, f64)> {
+    #[link(name = "ntdll", kind = "raw-dylib")]
+    extern "system" {
+        fn NtQueryTimerResolution(coarsest: *mut u32, finest: *mut u32, current: *mut u32) -> i32;
+    }
+    let (mut coarsest, mut finest, mut current) = (0u32, 0u32, 0u32);
+    let status = unsafe { NtQueryTimerResolution(&mut coarsest, &mut finest, &mut current) };
+    (status >= 0).then(|| (f64::from(current) / 1e4, f64::from(finest) / 1e4))
+}
+
+#[cfg(not(windows))]
+fn timer_resolution() -> Option<(f64, f64)> {
+    None
 }
 
 /// The gear right-clicking shows, at the pointer's top left, where the desktop's own menu does not open: where it was
@@ -549,6 +687,8 @@ struct Gfx {
     kind: Api,
     window: Window,
     gear: Option<egui::TextureHandle>,
+    /// The installer's glass box, which the cards about Software Update show.
+    update_logo: Option<egui::TextureHandle>,
     perf: Perf,
     api: String,
     /// The API's own description, which `api` adds where the wave is built to.
@@ -602,6 +742,8 @@ struct App {
     fps_source: &'static str,
     saved_fps: Option<f64>,
     pacing: Pacing,
+    /// The frame wait's spin a frame, eased, for the overlay.
+    spin_ms: f64,
     start: Instant,
     /// Frames begun, which a test's clock counts in.
     frames: u64,
@@ -672,7 +814,19 @@ struct App {
     update_tidied: bool,
     /// NAGARE_UPDATE_NOW=force: the run's first check is a forced one, as the panel's Reinstall makes.
     update_force_first: bool,
-    consent_hits: Vec<(bool, (f64, f64, f64, f64))>,
+    /// The cards on the scene - Software Update's question, and the update ready to install - and where their buttons
+    /// were last laid out, in the window's pixels; and the version whose card Later put away for this run.
+    card_hits: Vec<(CardHit, (f64, f64, f64, f64))>,
+    update_card_later: Option<String>,
+    /// The version the tray's notification has told of, once per version a run (Windows' tray only).
+    #[cfg_attr(not(windows), allow(dead_code))]
+    update_notified: Option<String>,
+    /// The poke shield (shield.rs) while it has a part to play, and on which window: the settings window's (true) or
+    /// the scene's own, with the panel; and whether the pokes just asked for the settings window, which takes the
+    /// shield as it opens. Where the pointer lies in the settings window, in its pixels.
+    shield: Option<(bool, shield::Shield)>,
+    shield_pending: bool,
+    settings_cursor: (f64, f64),
     intro_seen: bool,
     /// The first start's word on the tray icon, NORB_SEC after the XMB's start that follows the card: whether it is
     /// still to come, and when it is due.
@@ -753,6 +907,12 @@ struct App {
     limit: Option<f64>,
     neighbour_hidden: bool,
     snap_black: bool,
+    /// Whether the scene draws frame after frame, as about_to_wait last found: each frame then asks for the next.
+    drawing: bool,
+    /// The scene coming in by the XMB's own fade, the background hidden and shown again - the benchmark's, or the start's
+    /// with startTransition's Background fade: over how many milliseconds (the benchmark's BENCH_FADE_MS, short or long,
+    /// or backgroundFadeMs), and whether the black it starts from has been sent.
+    bench_fade: Option<(f64, bool)>,
     renderer: String,
     processes: [String; 3],
     process_lists: [Vec<String>; 3],
@@ -797,9 +957,16 @@ impl App {
         if let Some(v) = &saved {
             panel.apply_json(&serde_json::json!({ "scene": v["scene"] }), &mut scene, &mut particle_settings, &mut wave_settings, &mut native_settings);
         }
-        // The app opens as the console does, with the XMB's start. It is set after the panel is made, so the setting's
-        // default stays None, and the first sync plays it.
-        scene.sequence = "coldboot";
+        // The app opens as the console does, with the XMB's start - or, with startTransition's Background fade, with the
+        // background shown again, faded in from black. It is set after the panel is made, so the setting's default
+        // stays None, and the first sync plays it; whichever it is, the config's or --set's, is known before then.
+        let start_fade = options.sets.iter().rev().find(|(k, _)| k == "startTransition").map(|(_, v)| *v).or_else(|| {
+            saved.as_ref().and_then(|v| v["native"]["changed"]["startTransition"].as_f64())
+        });
+        let start_fade = start_fade.unwrap_or(native_settings.start_transition).round() == 1.0;
+        if !start_fade {
+            scene.sequence = "coldboot";
+        }
         let start = Instant::now();
         let date = options.test.as_ref().map_or_else(|| chrono::Local::now().naive_local(), |t| t.date);
         let writers = themes.apply(&mut scene, &mut particle_settings, &mut wave_settings, panel.locked(), 0.0, date);
@@ -820,6 +987,12 @@ impl App {
             panel.set_native("autoMusic", 0.0, &mut native_settings);
         }
         for (key, value) in &options.sets {
+            // The scene's music, as the panel's Music sets it (the config's musicPlaying), for a run with the music theme
+            // playing - and what plays under it, the disco ball and maru-chan's music.
+            if key == "musicPlaying" {
+                scene.music_playing = *value != 0.0;
+                continue;
+            }
             if !panel.set_any(key, *value, &mut particle_settings, &mut wave_settings, &mut native_settings) {
                 eprintln!("--set: no setting {key}");
             }
@@ -853,6 +1026,9 @@ impl App {
         // The frame cap's Auto, the benchmark's choice, unless a cap was chosen by hand since it came.
         // The pokes' tip, until dismissed; a test's frames show none.
         let poke_tip = !saved.as_ref().and_then(|v| v["pokeTipDismissed"].as_bool()).unwrap_or(false) && options.test.is_none();
+        let scroll_hint = !saved.as_ref().and_then(|v| v["scrollHintDismissed"].as_bool()).unwrap_or(false) && options.test.is_none();
+        config_saved["scrollHintDismissed"] = (!scroll_hint && options.test.is_none()).into();
+        panel.scroll_hint = scroll_hint;
         config_saved["pokeTipDismissed"] = (!poke_tip && options.test.is_none()).into();
         // Software Update: asked about once; on unless the answer was no; the first check of a run a random 1 to 60
         // minutes in, and never before the one the last run set (NAGARE_UPDATE_NOW=1: 5 s in, asked or not, to try it;
@@ -900,6 +1076,7 @@ impl App {
         // A test's particles are seeded, so that each run emits the same.
         let seed = options.test.as_ref().map(|_| 1);
         let sim = Later::spawn("simulations' start", move || Sim::new(seed));
+        let start_fade_ms = start_fade.then_some((particle_settings.background_fade_ms, false));
         App {
             options,
             gfx: None,
@@ -922,6 +1099,7 @@ impl App {
             fps_source,
             saved_fps,
             pacing: Pacing::Vsync { hz: None },
+            spin_ms: 0.0,
             start,
             frames: 0,
             exit: false,
@@ -974,7 +1152,12 @@ impl App {
             update_scheduled: true,
             update_tidied: false,
             update_force_first: std::env::var("NAGARE_UPDATE_NOW").is_ok_and(|v| v == "force"),
-            consent_hits: Vec::new(),
+            card_hits: Vec::new(),
+            update_card_later: None,
+            update_notified: None,
+            shield: None,
+            shield_pending: false,
+            settings_cursor: (0.0, 0.0),
             refresh_hz: None,
             drivers_checked: 0.0,
             best_at: None,
@@ -1015,6 +1198,8 @@ impl App {
             limit: None,
             neighbour_hidden: false,
             snap_black: false,
+            drawing: false,
+            bench_fade: start_fade_ms,
             renderer: String::new(),
             process_lists: processes.each_ref().map(|t| neighbour::parse_processes(t)),
             process_running: Default::default(),
@@ -1056,21 +1241,97 @@ impl App {
             && self.warning_look.is_none()
     }
 
-    /// A click at (x, y), in the window's pixels, on the card's OK or × (yes) or No: the answer, kept. Yes checks a
-    /// random 1 to 60 minutes later; no turns Auto-check off.
-    fn consent_click(&mut self, x: f64, y: f64) -> bool {
-        if !self.consent_showing() {
+    /// A click at (x, y), in the window's pixels, on a card's button: the question's OK or × (yes) or No, the answer
+    /// kept - yes checks a random 1 to 60 minutes later, no turns Auto-check off; or the update card's Install now,
+    /// Later (or ×) and What's new.
+    fn card_click(&mut self, x: f64, y: f64) -> bool {
+        if !self.consent_showing() && self.update_card().is_none() {
             return false;
         }
-        let hit = self.consent_hits.iter().find(|(_, (x0, y0, x1, y1))| x >= *x0 && y >= *y0 && x < *x1 && y < *y1).map(|(yes, _)| *yes);
-        let Some(yes) = hit else { return false };
-        self.update_consent = Some(yes);
-        self.update_auto = yes;
-        if yes {
-            self.update_next = update::unix_now() + update::random_secs(UPDATE_FIRST.0, UPDATE_FIRST.1);
+        let hit = self.card_hits.iter().find(|(_, (x0, y0, x1, y1))| x >= *x0 && y >= *y0 && x < *x1 && y < *y1).map(|(h, _)| *h);
+        let Some(hit) = hit else { return false };
+        match hit {
+            CardHit::Yes | CardHit::No => {
+                let yes = hit == CardHit::Yes;
+                self.update_consent = Some(yes);
+                self.update_auto = yes;
+                if yes {
+                    self.update_next = update::unix_now() + update::random_secs(UPDATE_FIRST.0, UPDATE_FIRST.1);
+                }
+            }
+            CardHit::Install => self.install_update(),
+            CardHit::Later => self.update_card_later = self.update_card().map(|c| c.version),
+            CardHit::Notes => {
+                if let Some(c) = self.update_card() {
+                    update::open_page(&update::release_page(&c.version));
+                }
+            }
         }
-        self.consent_hits.clear();
+        self.card_hits.clear();
         true
+    }
+
+    /// The card about an update this run has not put away (Later), while nothing else has the screen: a downloaded
+    /// update waiting to be installed, or, for a copy that cannot install one, a version that is out.
+    fn update_card(&self) -> Option<UpdateCard> {
+        if !cfg!(windows) || self.options.test.is_some() || self.intro_showing() || self.warning_look.is_some() || self.consent_showing() {
+            return None;
+        }
+        let card = match self.updater.status() {
+            update::Status::Ready { version, path } => {
+                // Installing by itself, it shows no card (update_tick installs it).
+                if self.native_settings.update_auto_install != 0.0 {
+                    return None;
+                }
+                let size = std::fs::metadata(&path).map_or(0, |m| m.len());
+                UpdateCard { version, size: Some(size) }
+            }
+            update::Status::Available { version } => UpdateCard { version, size: None },
+            _ => return None,
+        };
+        (self.update_card_later.as_ref() != Some(&card.version)).then_some(card)
+    }
+
+    /// The tray's part in Software Update: the menu's update item while an update waits - Install, or the release page
+    /// for a copy that cannot install it - and a notification, once a run for each version.
+    #[cfg(windows)]
+    fn tray_update(&mut self) {
+        let auto = self.native_settings.update_auto_install != 0.0;
+        let installable = self.update_installable();
+        let Some(tray) = &mut self.tray else { return };
+        let (label, news) = match self.updater.status() {
+            update::Status::Ready { version, .. } if !auto && installable => (
+                Some(format!("Install Nagare {version}")),
+                Some((version.clone(), format!("Nagare {version} is ready to install"), "Downloaded and checked. Install it from this icon's menu, or from the card on your desktop.".to_string())),
+            ),
+            update::Status::Available { version } => (
+                Some(format!("Nagare {version} is out: open its page")),
+                Some((version.clone(), format!("Nagare {version} is out"), "This copy can't update itself: this icon's menu opens the new version's page.".to_string())),
+            ),
+            _ => (None, None),
+        };
+        tray.set_update(label.as_deref());
+        if let Some((version, title, text)) = news {
+            if self.update_notified.as_deref() != Some(&version) {
+                self.update_notified = Some(version);
+                if let Err(e) = tray.notify(&title, &text, None, tray::Picture::UpdateBox(UPDATE_LOGO)) {
+                    eprintln!("tray: could not tell of the update: {e}");
+                }
+            }
+        }
+    }
+
+    /// Installs the downloaded update now, as the user asked: the card's or the panel's Install now.
+    fn install_update(&mut self) {
+        if let update::Status::Ready { version, path } = self.updater.status() {
+            if self.update_installable() {
+                eprintln!("update: installing {version} from {}, as asked", path.display());
+                self.updater.set(match update::install(&path, &version) {
+                    Ok(()) => update::Status::Installing { version },
+                    Err(e) => update::Status::Failed(e),
+                });
+            }
+        }
     }
 
     /// Whether this copy can install an update itself: one the installer installed. Another hears of a new version
@@ -1085,7 +1346,7 @@ impl App {
     fn check_for_update(&mut self, automatic: bool, force: bool) {
         if !self.updater.status().busy() {
             self.update_scheduled = false;
-            self.updater.start(self.update_installable(), automatic, force);
+            self.updater.start(self.update_installable(), automatic, force, self.native_settings.update_channel != 0.0);
         }
     }
 
@@ -1113,7 +1374,8 @@ impl App {
             self.update_tidied = true;
             update::tidy();
         }
-        if let update::Status::Ready { version, path } = status {
+        // By itself only with updateAutoInstall; otherwise the card (or the panel) asks first.
+        if let (update::Status::Ready { version, path }, true) = (status, self.native_settings.update_auto_install != 0.0) {
             let full_screen = self.neighbour.as_ref().is_some_and(|n| n.seen().fullscreen.is_some());
             if self.update_installable() && !full_screen {
                 eprintln!("update: installing {version} from {}", path.display());
@@ -1133,12 +1395,18 @@ impl App {
             Status::Idle if self.update_consent.is_none() => (format!("Nagare {current}; not checked yet"), false),
             Status::Idle => (format!("Nagare {current}"), false),
             Status::Checking => ("Checking GitHub for a newer version...".to_string(), false),
+            Status::UpToDate { .. } if self.native_settings.update_channel != 0.0 => {
+                (format!("Nagare {current} is up to date with the latest release"), false)
+            }
             Status::UpToDate { .. } => (format!("Nagare {current} is up to date"), false),
             Status::Available { version } => (format!("Nagare {version} is out; this copy was not installed by the installer, so get it from"), true),
             Status::Downloading { version, done, total } => {
                 (format!("Downloading Nagare {version}: {:.0}%", done as f64 / total.max(1) as f64 * 100.0), false)
             }
-            Status::Ready { version, .. } => (format!("Nagare {version} is downloaded; it installs once nothing is full screen"), false),
+            Status::Ready { version, .. } if self.native_settings.update_auto_install != 0.0 => {
+                (format!("Nagare {version} is downloaded and checked; it installs once nothing is full screen"), false)
+            }
+            Status::Ready { version, .. } => (format!("Nagare {version} is downloaded and checked, ready to install"), false),
             Status::Installing { version } => (format!("Installing Nagare {version}; Nagare starts again by itself"), false),
             Status::Stuck { version } => (format!("Nagare {version} did not install last time; Check now tries again, or get it from"), true),
             Status::Failed(e) => (format!("The update check failed: {e}"), false),
@@ -1158,6 +1426,7 @@ impl App {
     fn tip_showing(&self) -> bool {
         self.poke_tip
             && !self.consent_showing()
+            && self.update_card().is_none()
             && self.frame_now - self.xmb_at >= TIP_AFTER
             && self.native_settings.pokes_to_open.round() >= 1.0
             && !self.settings_open()
@@ -1225,6 +1494,8 @@ impl App {
                 if bench {
                     self.maru_chan.sail_now(now);
                     self.machine.drivers = drivers;
+                    // The benchmark has the screen: a window's settings wait until it is over.
+                    self.ui_visible = false;
                     // The first start begins on a clear desktop, the scene black behind the icons.
                     #[cfg(windows)]
                     if self.wallpaper.is_some() && self.options.test.is_none() {
@@ -1251,11 +1522,11 @@ impl App {
         let shown = intro.bench_scene(now);
         if shown && !self.bench_shown {
             self.themes.settle();
+            self.bench_fade = Some((if intro.short() { BENCH_FADE_MS[0] } else { BENCH_FADE_MS[1] }, false));
         }
         if self.bench_shown && !shown {
             let n = &self.native_settings;
-            let next = (n.maru_chan != 0.0).then(|| now + n.maru_first_min.max(0.0) * 60.0);
-            self.maru_chan.dock(next);
+            self.maru_chan.dock((n.maru_chan != 0.0).then_some(now));
         }
         self.bench_shown = shown;
         if let Some(fps) = step.measured {
@@ -1359,9 +1630,10 @@ impl App {
             return;
         }
         let d = &mut self.drawn;
-        let holds: [(&'static str, &mut f64, f64); 12] = [
+        let holds: [(&'static str, &mut f64, f64); 13] = [
             ("supersample", &mut d.supersample, 1.0),
             ("maruSupersample", &mut d.maru_supersample, 1.0),
+            ("discoBallSupersample", &mut d.disco_ball_supersample, 1.0),
             ("maruMotionBlur", &mut d.maru_motion_blur, 0.0),
             ("maruSceneLight", &mut d.maru_scene_light, 0.0),
             ("motionBlur", &mut d.motion_blur, 0.0),
@@ -1710,8 +1982,9 @@ impl App {
             Back::Vk(v) => v.egui.ctx.clone(),
         };
         let gear = decode_png(logo::png(GEAR_LOGO)).map(|image| ctx.load_texture("gear", image, egui::TextureOptions::LINEAR));
+        let update_logo = decode_png(UPDATE_LOGO).map(|image| ctx.load_texture("update logo", image, egui::TextureOptions::LINEAR));
         self.generation += 1;
-        Gfx { back, kind, window, gear, perf, api_base: api.clone(), api, renderer }
+        Gfx { back, kind, window, gear, update_logo, perf, api_base: api.clone(), api, renderer }
     }
 
     /// Everything that draws into the window with OpenGL: the context and all it holds. Made with the window, and made
@@ -2063,28 +2336,54 @@ impl App {
         }
     }
 
+    /// How far from the run's first poke the others may land, in the window's pixels: the poke shield's radius, so
+    /// that only clicks in one place count, never clicks and drags about the desktop.
+    fn poke_reach(&self) -> f64 {
+        shield::RADIUS * self.gfx.as_ref().map_or(1.0, |g| g.window.scale_factor())
+    }
+
     /// A click on the scene, at (x, y) in its window's pixels and `screen` on the screen: counted with the ones just
-    /// before it, it bounces the camera, and the pokesToOpen-th opens the settings. 0 pokes turns it off.
+    /// before it - quick enough, and near the run's first - it bounces the camera, and the pokesToOpen-th opens the
+    /// settings. 0 pokes turns it off.
     fn poke(&mut self, now: f64, x: f64, y: f64, screen: Option<(i32, i32)>) {
         let wanted = self.native_settings.pokes_to_open.round().max(0.0) as u32;
         if wanted == 0 || self.settings_open() {
             self.poke.count = 0;
             return;
         }
-        if now - self.poke.last > POKE_GAP {
+        let (fx, fy) = self.poke.from;
+        if now - self.poke.last > POKE_GAP || (x - fx).hypot(y - fy) > self.poke_reach() {
             self.poke.count = 0;
         }
+        let from = if self.poke.count == 0 { (x, y) } else { self.poke.from };
         // The bounce grows with the pokes: half of pokeBounce at the first, all of it from halfway to the last on.
         let count = self.poke.count + 1;
         let halfway = (wanted.saturating_sub(1) as f64 / 2.0).max(1.0);
         let grown = ((count - 1) as f64 / halfway).min(1.0);
         let bounce = self.native_settings.poke_bounce * (0.5 + 0.5 * grown);
-        self.poke = Poke { count, last: now, at: (x, y), bounce };
+        self.poke = Poke { count, last: now, at: (x, y), from, bounce };
         if self.poke.count >= wanted {
             self.poke.count = 0;
+            // The clicks still coming must not land on the settings: a shield where the pointer is (shield.rs). In a
+            // window the panel shows at once; behind the icons the settings window takes it as it opens.
+            let scale = self.gfx.as_ref().map_or(1.0, |g| g.window.scale_factor());
+            if self.is_wallpaper() {
+                self.shield_pending = true;
+            } else {
+                self.shield = Some((false, shield::Shield::new(x, y, scale, self.start.elapsed().as_secs_f64())));
+            }
             // Learnt: the tip saying so is put away for good.
             self.poke_tip = false;
             self.toggle_settings(screen);
+        }
+    }
+
+    /// The left button up at (x, y), in the window's pixels (None: off the desktop): a press dragged away from the
+    /// run's first poke was a drag, not a poke, and ends the run.
+    fn poke_release(&mut self, at: Option<(f64, f64)>) {
+        let (fx, fy) = self.poke.from;
+        if self.poke.count > 0 && at.is_none_or(|(x, y)| (x - fx).hypot(y - fy) > self.poke_reach()) {
+            self.poke.count = 0;
         }
     }
 
@@ -2154,8 +2453,8 @@ impl App {
             Some(s) if s.running => maru::Heard {
                 listening: true,
                 kicks: s.kicks,
-                loud: r.activity as f32,
                 bass: if s.bass_hz.is_some() { r.bass_level as f32 } else { 0.0 },
+                bass_hz: s.bass_hz.map_or(0.0, |hz| hz as f32),
                 shake_hz: r.shake_hz as f32,
                 beat_phase: s.tempo.filter(|t| t.period > 0.0).map_or(0.0, |t| {
                     let now = Instant::now();
@@ -2187,7 +2486,7 @@ impl App {
             match (click.right, click.down) {
                 (false, true) => {
                     if let Some((x, y)) = at {
-                        if self.consent_click(x, y) || self.tip_dismissed_by(x, y) {
+                        if self.card_click(x, y) || self.tip_dismissed_by(x, y) {
                             self.left_taken = true;
                         } else if self.gear.as_ref().is_some_and(|g| g.hit(x, y, scale)) {
                             let near = self.gear.take().and_then(|g| g.screen);
@@ -2215,7 +2514,7 @@ impl App {
                         }
                     }
                 }
-                (false, false) => {}
+                (false, false) => self.poke_release(at),
             }
         }
         let Some(p) = wallpaper::pointer(hwnd) else { return };
@@ -2287,6 +2586,10 @@ impl App {
         let auto_cap = self.auto_cap();
         let (update_status, update_link) = self.update_text();
         let auto_before = self.update_auto;
+        let update_ready = match self.updater.status() {
+            update::Status::Ready { version, .. } if self.update_installable() => Some(version),
+            _ => None,
+        };
         let mut header = panel::Header {
             fps: self.fps,
             wallpaper_available: cfg!(windows),
@@ -2325,6 +2628,7 @@ impl App {
             update_auto: &mut self.update_auto,
             update_status: &update_status,
             update_link,
+            update_ready,
         };
         let actions = self.panel.ui(
             ctx,
@@ -2339,6 +2643,11 @@ impl App {
             let parsed = neighbour::parse_processes(text);
             if *list != parsed {
                 *list = parsed;
+            }
+        }
+        if let Some((on, s)) = &self.shield {
+            if *on == standalone {
+                s.paint(ctx, f64::from(ctx.pixels_per_point()), self.start.elapsed().as_secs_f64());
             }
         }
         // Auto-check ticked or unticked is the answer the card asks for; ticked, the first check is a random 1 to 60
@@ -2383,8 +2692,11 @@ impl App {
         if let Back::Vk(vk) = &mut gfx.back {
             // Triple buffering - a frame queued ahead, which rides out a hitch shorter than a frame - while the frame
             // rate is high enough that the frame it adds to the latency is short; off below TRIPLE_OFF.
+            let music_off = self.native_settings.triple_buffering_music_off != 0.0 && self.music_on;
             self.frame_latency = match self.native_settings.triple_buffering.round() as u8 {
                 0 => 1,
+                // While the music plays, a frame closer to what is heard (tripleBufferingMusicOff).
+                _ if music_off => 1,
                 1 => 2,
                 _ if self.fps > 0.0 && self.fps < TRIPLE_OFF => 1,
                 _ if self.fps >= TRIPLE_ON => 2,
@@ -2407,6 +2719,11 @@ impl App {
         }) };
         while self.options.sets_at.first().is_some_and(|(at, _, _)| now >= *at) {
             let (_, key, value) = self.options.sets_at.remove(0);
+            // The scene's music too, as --set takes it.
+            if key == "musicPlaying" {
+                self.scene.music_playing = value != 0.0;
+                continue;
+            }
             let (p, w, n) = (&mut self.particle_settings, &mut self.wave_settings, &mut self.native_settings);
             if !self.panel.set_any(&key, value, p, w, n) {
                 eprintln!("--set-at: no setting {key}");
@@ -2420,10 +2737,14 @@ impl App {
                 self.norb_due = false;
                 self.norb_at = Some(now + NORB_SEC);
             }
-            self.scene.sequence = "coldboot";
+            if self.native_settings.start_transition.round() == 1.0 {
+                self.bench_fade = Some((self.particle_settings.background_fade_ms, false));
+            } else {
+                self.scene.sequence = "coldboot";
+                self.blacken = true;
+            }
             self.xmb_at = now;
             self.restart_start = false;
-            self.blacken = true;
         }
         let (look, restart) = self.warning.update(now, &self.native_settings);
         self.warning_look = look;
@@ -2463,9 +2784,24 @@ impl App {
         // at once, as the console's do.
         // A stop's fade hides the background as the XMB's own does, without touching the setting; coming back by a
         // fade, the first frame stands at black, so that the next fades in from it.
+        // The benchmark's scene, or the start's, comes in as the background shown again, from black, over its own time.
+        let mut fade_ms = self.particle_settings.background_fade_ms;
+        let mut bench_black = false;
+        match self.bench_fade {
+            Some((ms, false)) => {
+                bench_black = true;
+                self.snap_black = true;
+                self.bench_fade = Some((ms, true));
+            }
+            Some((ms, true)) => {
+                fade_ms = ms;
+                self.bench_fade = None;
+            }
+            None => {}
+        }
         let hidden_by_hand = self.scene.background_hidden;
-        self.scene.background_hidden = hidden_by_hand || self.neighbour_hidden;
-        let fade = self.themes.scene_fade(&self.scene, self.particle_settings.background_fade_ms);
+        self.scene.background_hidden = hidden_by_hand || self.neighbour_hidden || bench_black;
+        let fade = self.themes.scene_fade(&self.scene, fade_ms);
         self.scene.background_hidden = hidden_by_hand;
         let fade = if self.snap_black {
             self.snap_black = false;
@@ -2568,6 +2904,9 @@ impl App {
         if actions.reinstall_update {
             self.check_for_update(false, true);
         }
+        if actions.install_update {
+            self.install_update();
+        }
         if actions.maru_now {
             self.maru_chan.sail_now(now);
         }
@@ -2578,6 +2917,12 @@ impl App {
             self.disco.drop_now();
         }
         if actions.benchmark.is_some() || actions.intro_now {
+            // The settings go, to let the benchmark or the card have the screen.
+            if self.is_wallpaper() {
+                self.close_settings = true;
+            } else {
+                self.ui_visible = false;
+            }
             self.start_intro(now, actions.benchmark.is_some(), actions.benchmark == Some(true), actions.intro_now);
         }
         if actions.reveal_config {
@@ -2705,8 +3050,16 @@ impl App {
     }
 
     /// The panel and the gear, laid out in `ctx`, the scene window's.
-    fn scene_ui(&mut self, ctx: &egui::Context, perf_level: &mut u8, gfx_info: (&str, &str, Option<&egui::TextureHandle>), f: &FrameAt, ae_state: (Option<f64>, f64)) -> panel::Actions {
-        let (api, renderer, tex) = gfx_info;
+    #[allow(clippy::type_complexity)]
+    fn scene_ui(
+        &mut self,
+        ctx: &egui::Context,
+        perf_level: &mut u8,
+        gfx_info: (&str, &str, Option<&egui::TextureHandle>, Option<&egui::TextureHandle>),
+        f: &FrameAt,
+        ae_state: (Option<f64>, f64),
+    ) -> panel::Actions {
+        let (api, renderer, tex, update_logo) = gfx_info;
         let mut actions = panel::Actions::default();
         if let Some(intro) = &self.intro {
             intro.paint(ctx, f.now, &self.native_settings);
@@ -2736,55 +3089,27 @@ impl App {
                         });
                 });
         }
-        // The card asking about Software Update, at the top, in the middle: its buttons' clicks are caught as the
-        // tip's × is, behind the icons too.
+        // The cards about Software Update, at the top, in the middle - the question first - their buttons' clicks caught
+        // as the tip's × is, behind the icons too.
         if self.consent_showing() {
-            let s = f.scale;
-            let ink = |a: u8| egui::Color32::from_white_alpha(a);
-            let rect = |r: egui::Rect| {
-                let r = r.expand(3.0);
-                (r.min.x as f64 * s, r.min.y as f64 * s, r.max.x as f64 * s, r.max.y as f64 * s)
+            self.card_hits = card(ctx, f.scale, update_logo, "Software Update", CONSENT_TEXT, &[("OK", CardHit::Yes), ("No, don't check", CardHit::No)], CardHit::Yes);
+        } else if let Some(c) = self.update_card() {
+            let (title, body, buttons): (String, String, &[(&str, CardHit)]) = match c.size {
+                Some(size) => (
+                    format!("Nagare {} is ready to install", c.version),
+                    format!(
+                        "Downloaded and checked: {:.1} MB, signed with Nagare's release key. Installing closes Nagare for a few seconds, then starts it again; your settings stay as they are.",
+                        size as f64 / 1_000_000.0
+                    ),
+                    &[("Install now", CardHit::Install), ("Later", CardHit::Later), ("What's new", CardHit::Notes)],
+                ),
+                None => (
+                    format!("Nagare {} is out", c.version),
+                    "This copy was not installed by the installer, so it cannot update itself: get the new version from its release page.".to_string(),
+                    &[("Open the release page", CardHit::Notes), ("Later", CardHit::Later)],
+                ),
             };
-            let button = |ui: &mut egui::Ui, text: &str, strong: bool| {
-                egui::Frame::new()
-                    .fill(egui::Color32::from_white_alpha(if strong { 60 } else { 28 }))
-                    .corner_radius(5.0)
-                    .inner_margin(egui::Margin::symmetric(14, 5))
-                    .show(ui, |ui| ui.label(egui::RichText::new(text).size(13.0).color(ink(235))))
-                    .response
-                    .rect
-            };
-            let hits = egui::Area::new(egui::Id::unique("update consent"))
-                .anchor(egui::Align2::CENTER_TOP, egui::vec2(0.0, 24.0))
-                .order(egui::Order::Foreground)
-                .interactable(false)
-                .show(ctx, |ui| {
-                    egui::Frame::new()
-                        .fill(egui::Color32::from_black_alpha(200))
-                        .corner_radius(8.0)
-                        .inner_margin(egui::Margin { left: 14, right: 8, top: 8, bottom: 12 })
-                        .show(ui, |ui| {
-                            ui.set_max_width(430.0);
-                            let close = ui
-                                .horizontal(|ui| {
-                                    ui.label(egui::RichText::new("Software Update").size(14.0).strong().color(ink(240)));
-                                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                                        ui.label(egui::RichText::new("×").size(21.0).color(ink(220))).rect
-                                    })
-                                    .inner
-                                })
-                                .inner;
-                            ui.label(egui::RichText::new(CONSENT_TEXT).size(12.5).color(ink(220)));
-                            ui.add_space(6.0);
-                            let (ok, no) = ui
-                                .horizontal(|ui| (button(ui, "OK", true), button(ui, "No, don't check", false)))
-                                .inner;
-                            vec![(true, rect(ok)), (true, rect(close)), (false, rect(no))]
-                        })
-                        .inner
-                })
-                .inner;
-            self.consent_hits = hits;
+            self.card_hits = card(ctx, f.scale, update_logo, &title, &body, buttons, CardHit::Later);
         }
         // The pokes' tip, at the top, in the middle, with its ×; the click on the × is caught as the gear's is.
         if self.tip_showing() {
@@ -2879,8 +3204,11 @@ impl App {
             width: f.width,
             height: f.height,
             palette: &self.scene.iridescent_palette,
+            sun: backdrop_sun(&self.wave_settings, &f.moment.date),
+            spot_light: [self.particle_settings.spot_pos_x as f32, self.particle_settings.spot_pos_y as f32, self.particle_settings.spot_pos_z as f32],
+            maru: self.maru_chan.bounds,
         };
-        self.disco.update(&frame);
+        self.disco.update(&frame, &mut self.sim.wave);
     }
 
     /// What the overlay shows besides the timings.
@@ -2899,6 +3227,13 @@ impl App {
             width,
             height,
             pacing: self.pacing.describe(),
+            timer: {
+                // The spin a frame, eased over half a second or so, and the resolution beside it.
+                let spun = SPUN_NS.swap(0, std::sync::atomic::Ordering::Relaxed) as f64 / 1e6;
+                self.spin_ms += (spun - self.spin_ms) * 0.05;
+                let resolution = timer_resolution().map_or("unknown".to_string(), |(now, finest)| format!("{now:.3} ms (finest {finest:.3})"));
+                format!("{resolution} · waits spin {:.2} ms a frame", self.spin_ms)
+            },
             wave_steps: wave_steps.saturating_sub(self.steps.0),
             particle_steps: particle_steps.saturating_sub(self.steps.1),
             particles,
@@ -2979,7 +3314,11 @@ impl App {
         self.sail(f);
         if self.disco.ball.is_some() {
             gfx.perf.gpu_begin(Pass::Disco);
-            g.disco.draw(gl, &self.disco, width, height, self.sim.fade.value as f32);
+            // The wave's light buffer, for the spots; the scene is drawn into renderScale's share of it.
+            if let Some((wave, scale)) = g.spline.wave_light() {
+                let share = render_scale(&self.drawn) as f32;
+                g.disco.draw(gl, &self.disco, width, height, self.sim.fade.value as f32, (wave, scale, share), g.spline.wave_mesh());
+            }
             gfx.perf.gpu_end();
         }
         if !self.maru_chan.out.is_empty() {
@@ -3027,11 +3366,11 @@ impl App {
         let showing_ae = self.ui_visible || self.settings_window.is_some();
         let ae_state = if ae_on && showing_ae { g.spline.auto_exposure(gl) } else { (None, 0.0) };
         let mut actions = panel::Actions::default();
-        if self.ui_visible || self.gear.is_some() || self.poke_hint(f.now).is_some() || self.warning_look.is_some() || self.intro_showing() || self.tip_showing() || self.consent_showing() {
+        if self.ui_visible || self.gear.is_some() || self.poke_hint(f.now).is_some() || self.warning_look.is_some() || self.intro_showing() || self.tip_showing() || self.consent_showing() || self.update_card().is_some() {
             gfx.perf.gpu_begin(Pass::Panel);
             let level = &mut gfx.perf.level;
             g.egui.run(&gfx.window, |ui| {
-                actions = self.scene_ui(ui.ctx(), level, (&gfx.api, &gfx.renderer, gfx.gear.as_ref()), f, ae_state);
+                actions = self.scene_ui(ui.ctx(), level, (&gfx.api, &gfx.renderer, gfx.gear.as_ref(), gfx.update_logo.as_ref()), f, ae_state);
             });
             // The epilepsy warning's blur over the whole scene, then the panel's under its window, where egui laid it
             // out, before egui paints.
@@ -3165,10 +3504,10 @@ impl App {
         let ae_state = if ae_on && showing_ae { vk.auto_exposure() } else { (None, 0.0) };
         let mut actions = panel::Actions::default();
         let size = [width as u32, height as u32];
-        if self.ui_visible || self.gear.is_some() || self.poke_hint(f.now).is_some() || self.warning_look.is_some() || self.intro_showing() || self.tip_showing() || self.consent_showing() {
+        if self.ui_visible || self.gear.is_some() || self.poke_hint(f.now).is_some() || self.warning_look.is_some() || self.intro_showing() || self.tip_showing() || self.consent_showing() || self.update_card().is_some() {
             let level = &mut gfx.perf.level;
             vk.egui.run(&gfx.window, |ui| {
-                actions = self.scene_ui(ui.ctx(), level, (&gfx.api, &gfx.renderer, gfx.gear.as_ref()), f, ae_state);
+                actions = self.scene_ui(ui.ctx(), level, (&gfx.api, &gfx.renderer, gfx.gear.as_ref(), gfx.update_logo.as_ref()), f, ae_state);
             });
             if self.warning_blur() > 0.0 {
                 vk.gpu_begin(Pass::Panel);
@@ -3254,10 +3593,47 @@ impl App {
             match opened {
                 Ok(sw) => {
                     self.settings_count += 1;
+                    if std::mem::take(&mut self.shield_pending) {
+                        self.shield = Self::shield_at_pointer(&sw.window, self.start.elapsed().as_secs_f64()).map(|s| (true, s));
+                    }
                     self.settings_window = Some(sw);
                 }
                 Err(e) => eprintln!("settings window: {e}"),
             }
+        }
+    }
+
+    /// The poke shield for a settings window just opened: where the pointer is, in the window's pixels.
+    #[cfg(windows)]
+    fn shield_at_pointer(window: &Window, now: f64) -> Option<shield::Shield> {
+        use windows_sys::Win32::Foundation::POINT;
+        use windows_sys::Win32::UI::WindowsAndMessaging::GetCursorPos;
+        let mut p = POINT { x: 0, y: 0 };
+        if unsafe { GetCursorPos(&mut p) } == 0 {
+            return None;
+        }
+        let at = window.inner_position().ok()?;
+        Some(shield::Shield::new(f64::from(p.x - at.x), f64::from(p.y - at.y), window.scale_factor(), now))
+    }
+
+    #[cfg(not(windows))]
+    fn shield_at_pointer(_window: &Window, _now: f64) -> Option<shield::Shield> {
+        None
+    }
+
+    /// Whether the poke shield on the settings window (`settings`) or the scene's refuses this left-button event at
+    /// (x, y), in the window's pixels: a press inside it while it holds, and that press's release.
+    fn shielded(&mut self, settings: bool, pressed: bool, x: f64, y: f64) -> bool {
+        let now = self.start.elapsed().as_secs_f64();
+        match &mut self.shield {
+            Some((on, s)) if *on == settings => {
+                if pressed {
+                    s.press(x, y, now)
+                } else {
+                    s.release()
+                }
+            }
+            _ => false,
         }
     }
 
@@ -3290,6 +3666,7 @@ impl App {
         value["introSeen"] = self.intro_seen.into();
         value["fpsAuto"] = self.fps_auto.into();
         value["pokeTipDismissed"] = (!self.poke_tip).into();
+        value["scrollHintDismissed"] = (!self.panel.scroll_hint).into();
         value["updateConsent"] = self.update_consent.map_or(serde_json::Value::Null, |c| c.into());
         value["updateAuto"] = self.update_auto.into();
         value["updateNext"] = self.update_next.round().into();
@@ -3446,7 +3823,26 @@ impl ApplicationHandler for App {
             event_loop.exit();
             return;
         }
+        let settings_window = self.settings_window.as_ref().is_some_and(|sw| sw.id() == id);
+        // The poke shield follows the pointer - leaving its circle ends it - and takes its clicks before egui sees them.
+        if let WindowEvent::CursorMoved { position, .. } = &event {
+            let now = self.start.elapsed().as_secs_f64();
+            if let Some((on, s)) = &mut self.shield {
+                if *on == settings_window {
+                    s.moved(position.x, position.y, now);
+                }
+            }
+        }
+        if let WindowEvent::MouseInput { state, button: MouseButton::Left, .. } = event {
+            let (x, y) = if settings_window { self.settings_cursor } else { self.cursor };
+            if self.shielded(settings_window, state == ElementState::Pressed, x, y) {
+                return;
+            }
+        }
         let Some(gfx) = &mut self.gfx else { return };
+        if let (true, WindowEvent::CursorMoved { position, .. }) = (settings_window, &event) {
+            self.settings_cursor = (position.x, position.y);
+        }
         // The settings window's own events: egui's, and closing it.
         if let Some(sw) = self.settings_window.as_mut().filter(|sw| sw.id() == id) {
             let context = match &gfx.back {
@@ -3504,6 +3900,12 @@ impl ApplicationHandler for App {
                     self.last = Some(self.start.elapsed().as_secs_f64());
                 } else {
                     self.frame();
+                    // The next frame asked for here too, not only from about_to_wait: in Windows' modal loops - a window
+                    // dragged, the tray icon's menu open, a caption button's tooltip - messages are still dispatched,
+                    // but the loop never comes back to about_to_wait, and the scene would stand still.
+                    if let (true, Some(gfx)) = (self.drawing, &self.gfx) {
+                        gfx.window.request_redraw();
+                    }
                 }
             }
             WindowEvent::KeyboardInput { event, .. } if !consumed => {
@@ -3529,7 +3931,7 @@ impl ApplicationHandler for App {
             }
             WindowEvent::CursorLeft { .. } => self.input.left(),
             WindowEvent::MouseInput { state, button: MouseButton::Left, .. } => match state {
-                ElementState::Pressed if !over_ui && self.consent_click(self.cursor.0, self.cursor.1) => {}
+                ElementState::Pressed if !over_ui && self.card_click(self.cursor.0, self.cursor.1) => {}
                 ElementState::Pressed if !over_ui && self.tip_dismissed_by(self.cursor.0, self.cursor.1) => {}
                 ElementState::Pressed if self.gear.as_ref().is_some_and(|g| g.hit(self.cursor.0, self.cursor.1, scale)) => {
                     self.gear = None;
@@ -3540,7 +3942,10 @@ impl ApplicationHandler for App {
                     self.input.press(self.cursor.0, self.cursor.1);
                     self.poke(now, self.cursor.0, self.cursor.1, None);
                 }
-                ElementState::Released => self.input.release(),
+                ElementState::Released => {
+                    self.input.release();
+                    self.poke_release(Some(self.cursor));
+                }
                 _ => {}
             },
             // Right-clicking the scene shows the gear where the button went down, as right-clicking the desktop does
@@ -3569,6 +3974,10 @@ impl ApplicationHandler for App {
         }
         self.apply_cpu();
         self.update_tick();
+        let now = self.start.elapsed().as_secs_f64();
+        if self.shield.as_ref().is_some_and(|(on, s)| !s.alive(now) || (*on && self.settings_window.is_none())) {
+            self.shield = None;
+        }
         if self.gfx.is_some() {
             self.follow_api(event_loop);
         }
@@ -3577,13 +3986,14 @@ impl ApplicationHandler for App {
             if let (Some(at), Some(tray)) = (self.norb_at, &self.tray) {
                 if self.frame_now >= at {
                     self.norb_at = None;
-                    match tray.notify(NORB_TITLE, NORB_TEXT, NORB_BUTTON) {
+                    match tray.notify(NORB_TITLE, NORB_TEXT, Some(NORB_BUTTON), tray::Picture::Logo) {
                         Ok(how) => eprintln!("tray: the first start's notification shown {how}"),
                         Err(e) => eprintln!("tray: could not show the first start's notification: {e}"),
                     }
                 }
             }
-            let command = self.tray.as_ref().and_then(|t| t.take());
+            self.tray_update();
+            let command = self.tray.as_ref().and_then(|t| t.take()).or_else(|| single::show_requested().then_some(tray::Command::Settings));
             let toggle = wallpaper::hotkey_pressed() || matches!(command, Some(tray::Command::ToggleWallpaper));
             // A stopped scene is made again for what needs it.
             if toggle || matches!(command, Some(tray::Command::Settings)) {
@@ -3594,6 +4004,11 @@ impl ApplicationHandler for App {
             }
             match command {
                 Some(tray::Command::ToggleWallpaper) => {}
+                Some(tray::Command::Update) => match self.updater.status() {
+                    update::Status::Ready { .. } => self.install_update(),
+                    update::Status::Available { version } => update::open_page(&update::release_page(&version)),
+                    _ => {}
+                },
                 Some(tray::Command::Settings) => {
                     if self.is_wallpaper() {
                         if self.settings_window.is_none() {
@@ -3659,6 +4074,7 @@ impl ApplicationHandler for App {
         let hidden = self.wallpaper.as_ref().is_some_and(|w| w.hidden());
         #[cfg(not(windows))]
         let hidden = false;
+        self.drawing = draw && !hidden && self.gfx.is_some();
         match &self.gfx {
             Some(_) if draw && hidden => {
                 event_loop.set_control_flow(ControlFlow::Poll);
@@ -3878,6 +4294,18 @@ fn main() {
     }
     options.shots.sort_by(|a, b| a.0.total_cmp(&b.0));
     options.sets_at.sort_by(|a, b| a.0.total_cmp(&b.0));
+    // One Nagare per config: a second one asks the first to show its settings, and goes (single.rs). A test reads no
+    // config, and runs beside anything.
+    let _single = match (options.test.is_none(), config::file()) {
+        (true, Some(file)) => match single::claim(&file) {
+            single::Claim::First(guard) => Some(guard),
+            single::Claim::Other => {
+                eprintln!("Nagare already runs with {}: it shows its settings instead", file.display());
+                return;
+            }
+        },
+        _ => None,
+    };
     let event_loop = EventLoop::new().expect("event loop");
     let mut app = App::new(options);
     event_loop.run_app(&mut app).expect("event loop");

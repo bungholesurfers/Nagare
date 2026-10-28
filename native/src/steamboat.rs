@@ -10,7 +10,8 @@
 //!   with the bass, as subShake shakes the camera: at the shake's rate, as much as the bass is loud. And it blows
 //!   steam with the bass, the more, the bigger and the faster the louder the bass; when heavy bass comes in all at
 //!   once, a burst, fanning out fast.
-//! - Its face blinks now and then, squints on a kick, and sings - its mouth open - when the music is loud.
+//! - Its face blinks now and then, squints on a kick, and sings - its mouth open - with heavy bass, the wider the lower
+//!   the bass (`maru::mouth`, as the scene's boat).
 //! - The moon swells and glows with the bass's level, and on the beat sways its head, left on one beat and right on
 //!   the next, a little.
 //! - Not listening, it sleeps at anchor on the calm sea, z's rising from its funnel.
@@ -85,8 +86,8 @@ pub struct Steamboat {
     /// The bass's waveform's restlessness: a phase of its own.
     restless: f32,
     puffs: Vec<Puff>,
-    /// The loudness (0 to 1), the bass's glow, eased.
-    loud: f32,
+    /// The bass's glow, how far the mouth is open (`maru::mouth`), eased.
+    mouth: f32,
     glow: f32,
     /// The sea: the calm swell's phase, moving at a steady pace; the bass's wave - how far the sea is it (0 to 1), its
     /// pitch shown, its height and its phase.
@@ -124,7 +125,7 @@ impl Default for Steamboat {
             puffed: 0,
             restless: 0.0,
             puffs: Vec::new(),
-            loud: 0.0,
+            mouth: 0.0,
             glow: 0.0,
             calm_phase: 0.0,
             bassy: 0.0,
@@ -138,11 +139,6 @@ impl Default for Steamboat {
             maru_ms: 0.0,
         }
     }
-}
-
-/// How far `x` is from `x0` to `x1`, held to 0..1.
-fn ramp(x: f64, x0: f64, x1: f64) -> f32 {
-    ((x - x0) / (x1 - x0)).clamp(0.0, 1.0) as f32
 }
 
 /// The boat's nod after a kick, 0 to 1, `since` seconds after it: up within 50 ms, then settling back.
@@ -163,10 +159,10 @@ impl Steamboat {
         self.t = t;
         let ease = |v: &mut f32, to: f32, rate: f32| *v += (to - *v) * (1.0 - (-dt * rate).exp());
         let awake = mood.filter(|m| m.listening);
-        // How loud: the response's activity (how loud it has been for a while), and the moment against the window.
-        let loud = |m: &Mood| (0.7 * m.activity as f32 + 0.3 * ramp(m.short_db - m.long_db, -10.0, 6.0)).clamp(0.0, 1.0);
-        ease(&mut self.loud, awake.map_or(0.0, loud), 6.0);
         ease(&mut self.glow, awake.map_or(0.0, |m| m.bass_level as f32), 8.0);
+        let open = awake.and_then(|m| m.bass_hz.map(|hz| crate::maru::mouth(m.bass_level as f32, hz as f32))).unwrap_or(0.0);
+        let rate = if open > self.mouth { 18.0 } else { 9.0 };
+        ease(&mut self.mouth, open, rate);
         // The sea: the swell at its steady pace; the bass's waveform in at once when a pitch is heard, gone at once
         // when not.
         self.calm_phase = (self.calm_phase + 1.3 * dt) % TAU;
@@ -392,10 +388,10 @@ impl Steamboat {
             p.circle_filled(at(ex + side * 2.6, -12.8), 1.9 * SCALE, Color32::from_rgba_unmultiplied(255, 143, 163, 170));
         }
         let mouth = at(-1.0, -12.5);
-        if awake && self.loud > 0.45 {
-            // Singing: an open mouth, wider the louder.
-            p.circle_filled(mouth, (1.2 + 1.4 * self.loud) * SCALE, Color32::from_rgb(0x8b, 0x1e, 0x2b));
-            p.circle_stroke(mouth, (1.2 + 1.4 * self.loud) * SCALE, Stroke::new(1.0_f32, INK));
+        if awake && self.mouth > crate::maru::MOUTH_SHUT {
+            // Singing: an open mouth, wider the heavier and the lower the bass.
+            p.circle_filled(mouth, (0.9 + 2.2 * self.mouth) * SCALE, Color32::from_rgb(0x8b, 0x1e, 0x2b));
+            p.circle_stroke(mouth, (0.9 + 2.2 * self.mouth) * SCALE, Stroke::new(1.0_f32, INK));
         } else {
             p.line_segment([mouth + SCALE * vec2(-1.8, -0.4), mouth + SCALE * vec2(0.0, 0.8)], Stroke::new(1.1_f32, INK));
             p.line_segment([mouth + SCALE * vec2(0.0, 0.8), mouth + SCALE * vec2(1.8, -0.4)], Stroke::new(1.1_f32, INK));

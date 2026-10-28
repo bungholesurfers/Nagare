@@ -79,14 +79,18 @@ windows-sys = { version = "0.59", features = [
   "Win32_Graphics_Dwm",
   "Win32_UI_Controls",
   "Win32_System_Registry",
+  "Win32_Security",
 ] }
 windows = { version = "0.62.2", features = ["Media_Control", "Foundation", "Foundation_Collections", "Win32_System_WinRT", "Win32_Graphics_Dxgi", "Win32_Media_Audio", "Win32_System_Com", "Win32_System_Com_StructuredStorage", "Win32_System_Variant", "UI_Notifications", "Data_Xml_Dom"] }
 
 [profile.dev]
 opt-level = 1
 
-# Thin LTO over 16 units: a change rebuilds in about 30 s rather than 110, for a few percent of the CPU's frame time.
-# The PGO builds (cargo xtask pgo) take fat LTO and one unit, the last few percent.
+# Everyday release builds are for working on Nagare: no LTO, 16 units and incremental compilation, so that an edit to
+# main.rs rebuilds in about 4 s rather than the 54 s thin LTO took (2026-10-28), for some of the CPU's frame time.
+# Releases are the PGO builds (cargo xtask pgo, pgo-build), which take fat LTO over one unit and no incremental
+# compilation, as they always did.
 [profile.release]
-lto = "thin"
+lto = "off"
 codegen-units = 16
+incremental = true

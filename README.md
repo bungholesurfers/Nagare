@@ -64,8 +64,8 @@ was done.
 - **An installer** for your user account only, with no administrator needed, and a watchdog that restarts Nagare if it
   crashes. A customizer designs the logo and the installer's look.
 - **Updates itself, if you say so.** Nagare first asks before it checks GitHub for a newer version. Then, every day or
-  two, it fetches the new installer, checks that it carries the release key's signature, and installs it quietly. It
-  sends nothing about you or your PC. It's the only thing Nagare uses the network for, and you can turn it off in the
+  two, it fetches the new installer, checks that it carries the release key's signature, and asks you before installing
+  it (a setting lets it install by itself instead). It sends nothing about you or your PC. It's the only thing Nagare uses the network for, and you can turn it off in the
   settings at any time.
 
 Everything is set from one settings panel, with a tooltip on every setting. The details, including every option and

@@ -1,12 +1,14 @@
 //! Software Update, Windows only: whether a newer Nagare is out, and, for a copy the installer installed, fetching
 //! that version's installer and running it silently - which stops Nagare, installs over it and starts it again.
 //!
-//! What is stable enough to update to is the tag in the repository's `update/stable.txt`; each release carries a
+//! What is stable enough to update to is the tag in the repository's `update/stable.txt`; on updateChannel's Latest
+//! release, it is the newest release published instead, its tag read off where GitHub's latest-release link redirects
+//! (a HEAD request: no page is fetched). Each release carries a
 //! manifest of its installer, signed with the release key (`signing.rs`). A check reads the tag, and, when it names a
 //! version newer than this one, that release's manifest and signature: the manifest is believed only if the key
 //! signed it, names that very version and an installer named for it, and the installer is kept only if its size and
 //! SHA-256 are the manifest's. A tag naming an older version, or this one, does nothing, so the unsigned tag can at
-//! worst hold updates back.
+//! worst hold updates back; the latest release's tag no more than offers a release the key signed.
 //!
 //! Every request goes to GitHub alone, over HTTPS alone - each redirect checked too, so nothing ever falls back to
 //! plain HTTP, as HSTS has a browser do - with TLS checked against Mozilla's roots, bundled, rather than whatever roots
@@ -19,8 +21,8 @@
 //! there. The network is only ever touched from the updater's own thread, and only when `main.rs` asks: after the user
 //! has said yes (or closed the question), or pressed Check now.
 //!
-//! NAGARE_UPDATE_SOURCE=FOLDER reads the files from FOLDER instead of GitHub (stable.txt, the manifest, its signature
-//! and the installer, side by side), to try the whole of it without publishing anything.
+//! NAGARE_UPDATE_SOURCE=FOLDER reads the files from FOLDER instead of GitHub (stable.txt, latest.txt standing for the
+//! latest release's tag, the manifest, its signature and the installer, side by side), to try the whole of it without publishing anything.
 
 #![cfg_attr(not(windows), allow(dead_code))]
 
@@ -36,6 +38,29 @@ use crate::version;
 pub const REPO: &str = "bungholesurfers/Nagare";
 /// The releases' page, for a copy that cannot install an update itself.
 pub const RELEASES_PAGE: &str = "https://github.com/bungholesurfers/Nagare/releases/latest";
+/// The release page of `version`: its notes, and its files.
+pub fn release_page(version: &str) -> String {
+    format!("https://github.com/{REPO}/releases/tag/v{version}")
+}
+
+/// Opens `url` in the system's browser.
+#[cfg(windows)]
+pub fn open_page(url: &str) {
+    use windows_sys::Win32::UI::Shell::ShellExecuteW;
+    use windows_sys::Win32::UI::WindowsAndMessaging::SW_SHOWNORMAL;
+    let wide = |s: &str| s.encode_utf16().chain([0]).collect::<Vec<u16>>();
+    let (verb, url) = (wide("open"), wide(url));
+    unsafe {
+        ShellExecuteW(core::ptr::null_mut(), verb.as_ptr(), url.as_ptr(), core::ptr::null(), core::ptr::null(), SW_SHOWNORMAL);
+    }
+}
+
+#[cfg(not(windows))]
+pub fn open_page(_url: &str) {}
+
+/// Where the newest release published (not a draft, not a pre-release) is: GitHub redirects it to that release's page,
+/// whose address ends in its tag.
+const LATEST_URL: &str = RELEASES_PAGE;
 /// The tag of the release to update to.
 const STABLE_URL: &str = "https://raw.githubusercontent.com/bungholesurfers/Nagare/main/update/stable.txt";
 /// The only hosts a request, or a redirect, may go to: the repository's files, its releases, and the storage GitHub
@@ -52,7 +77,7 @@ const MAX_INSTALLER: u64 = 256 * 1024 * 1024;
 pub enum Status {
     Idle,
     Checking,
-    /// The stable tag is this version, or an older one.
+    /// The tag checked (the stable one, or the latest release's) is this version, or an older one.
     UpToDate { stable: String },
     /// A newer version is out, which this copy cannot install itself (it was not installed by the installer).
     Available { version: String },
@@ -108,9 +133,9 @@ impl Updater {
     /// Checks for a newer version on a thread of its own, of the lowest priority, unless one already works; with
     /// `install`, a newer version's installer is then downloaded and checked, for `main.rs` to run - unless it is
     /// `automatic` and that version's installer already ran without taking (`tried`). `force` (the panel's Reinstall)
-    /// takes the stable version whatever this one is - the same, or even newer - still only as its signed manifest
-    /// describes it.
-    pub fn start(&self, install: bool, automatic: bool, force: bool) {
+    /// takes the channel's version whatever this one is - the same, or even newer - still only as its signed manifest
+    /// describes it. `latest`: the newest release published rather than the stable tag (updateChannel).
+    pub fn start(&self, install: bool, automatic: bool, force: bool, latest: bool) {
         if self.status().busy() {
             return;
         }
@@ -123,7 +148,7 @@ impl Updater {
                     *lock = s;
                 }
             };
-            set(match run(install, automatic, force, &set) {
+            set(match run(install, automatic, force, latest, &set) {
                 Ok(s) => s,
                 Err(e) => Status::Failed(e),
             });
@@ -136,11 +161,16 @@ impl Updater {
 
 /// The check, and with `install` the download.
 #[cfg(windows)]
-fn run(install: bool, automatic: bool, force: bool, set: &dyn Fn(Status)) -> Result<Status, String> {
+fn run(install: bool, automatic: bool, force: bool, latest: bool, set: &dyn Fn(Status)) -> Result<Status, String> {
     let source = Source::new();
-    let tag = String::from_utf8(source.fetch(STABLE_URL, MAX_TAG)?).map_err(|_| "the stable tag is not text")?;
+    let tag = if latest {
+        source.latest()?
+    } else {
+        String::from_utf8(source.fetch(STABLE_URL, MAX_TAG)?).map_err(|_| "the stable tag is not text")?
+    };
     let tag = tag.trim();
-    let stable = version::parse(tag).ok_or(format!("the stable tag {tag:?} is not a version"))?;
+    let which = if latest { "latest release's" } else { "stable" };
+    let stable = version::parse(tag).ok_or(format!("the {which} tag {tag:?} is not a version"))?;
     let stable = format!("{}.{}.{}", stable.0, stable.1, stable.2);
     if !force && !version::newer(&stable, version::CURRENT) {
         return Ok(Status::UpToDate { stable });
@@ -168,7 +198,7 @@ fn run(install: bool, automatic: bool, force: bool, set: &dyn Fn(Status)) -> Res
 }
 
 #[cfg(not(windows))]
-fn run(_install: bool, _automatic: bool, _force: bool, _set: &dyn Fn(Status)) -> Result<Status, String> {
+fn run(_install: bool, _automatic: bool, _force: bool, _latest: bool, _set: &dyn Fn(Status)) -> Result<Status, String> {
     Err("updates are checked on Windows only".into())
 }
 
@@ -309,6 +339,19 @@ impl Source {
         Ok(out)
     }
 
+    /// The latest release's tag (LATEST_URL), or latest.txt's in a folder.
+    fn latest(&self) -> Result<String, String> {
+        match self {
+            #[cfg(windows)]
+            Source::Web(agent) => latest_tag(agent),
+            Source::Folder(_) => {
+                String::from_utf8(self.fetch("latest.txt", MAX_TAG)?).map_err(|_| "latest.txt is not text".into())
+            }
+            #[cfg(not(windows))]
+            Source::None => Err("updates are checked on Windows only".into()),
+        }
+    }
+
     /// `url`'s body as a reader, which fails past `limit` bytes.
     fn open(&self, url: &str, limit: u64) -> Result<Box<dyn std::io::Read + Send>, String> {
         match self {
@@ -399,6 +442,32 @@ fn get(agent: &ureq::Agent, url: &str, limit: u64) -> Result<Box<dyn std::io::Re
     Err("too many redirects".into())
 }
 
+/// The latest release's tag, read off the redirect LATEST_URL answers a HEAD request with - the release's page,
+/// .../releases/tag/TAG - which is all that is read: no page comes. With no release published, GitHub redirects to the
+/// releases' list instead, which has no tag.
+#[cfg(windows)]
+fn latest_tag(agent: &ureq::Agent) -> Result<String, String> {
+    allowed(LATEST_URL)?;
+    let response = agent.head(LATEST_URL).call().map_err(|e| format!("{}: {e}", host(LATEST_URL)))?;
+    let status = response.status().as_u16();
+    if !(300..400).contains(&status) {
+        return Err(format!("{} answered {status} for the latest release", host(LATEST_URL)));
+    }
+    let location = response.headers().get("location").and_then(|l| l.to_str().ok()).ok_or("github.com named no latest release")?;
+    latest_from(location)
+}
+
+/// The tag in the address GitHub's latest-release link redirects to.
+fn latest_from(location: &str) -> Result<String, String> {
+    let location = location.strip_prefix("https://github.com").unwrap_or(location);
+    let prefix = format!("/{REPO}/releases/tag/");
+    location
+        .strip_prefix(prefix.as_str())
+        .filter(|tag| !tag.is_empty() && !tag.contains(['/', '?', '#']))
+        .map(str::to_string)
+        .ok_or("no release is published yet".into())
+}
+
 /// Fetches `url` the way the updater fetches its files, and says where it ended up and how much came: `--update-fetch`,
 /// to try the client against GitHub.
 #[cfg(windows)]
@@ -438,6 +507,15 @@ mod tests {
     use super::*;
 
     #[test]
+    fn latest() {
+        assert_eq!(latest_from("https://github.com/bungholesurfers/Nagare/releases/tag/v0.1.3").as_deref(), Ok("v0.1.3"));
+        assert_eq!(latest_from("/bungholesurfers/Nagare/releases/tag/v1.2.3").as_deref(), Ok("v1.2.3"));
+        assert!(latest_from("https://github.com/bungholesurfers/Nagare/releases").is_err());
+        assert!(latest_from("https://github.com/someone/Else/releases/tag/v9.9.9").is_err());
+        assert!(latest_from("https://github.com/bungholesurfers/Nagare/releases/tag/v1/x").is_err());
+    }
+
+    #[test]
     fn hosts() {
         assert!(allowed("https://github.com/bungholesurfers/Nagare/releases/download/v0.1.1/x").is_ok());
         assert!(allowed("https://release-assets.githubusercontent.com/github-production-release-asset/1?sig=2").is_ok());
@@ -459,6 +537,16 @@ mod tests {
 
     /// The client's TLS refuses bad certificates: expired, for another name, self-signed, from an unknown authority.
     /// It goes to the network, so it runs only when asked: cargo test --release -- --ignored tls
+    /// The latest release's tag, read off GitHub's redirect - on the network, so only with --ignored.
+    #[cfg(windows)]
+    #[test]
+    #[ignore]
+    fn latest_live() {
+        let tag = latest_tag(&agent()).expect("no latest release");
+        assert!(version::parse(&tag).is_some(), "{tag:?}");
+        eprintln!("latest release: {tag}");
+    }
+
     #[cfg(windows)]
     #[test]
     #[ignore]

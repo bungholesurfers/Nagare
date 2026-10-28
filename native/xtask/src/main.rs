@@ -163,9 +163,12 @@ fn check() -> Result {
     run(cargo().args(["test", "--release"]))
 }
 
-/// A release takes every last percent: fat LTO over one codegen unit, where everyday builds take thin LTO over 16.
+/// A release takes every last percent: fat LTO over one codegen unit, and no incremental compilation, where everyday
+/// builds take no LTO over 16 units, incrementally, to rebuild quickly.
 fn release_profile(cmd: &mut Command) -> &mut Command {
-    cmd.env("CARGO_PROFILE_RELEASE_LTO", "fat").env("CARGO_PROFILE_RELEASE_CODEGEN_UNITS", "1")
+    cmd.env("CARGO_PROFILE_RELEASE_LTO", "fat")
+        .env("CARGO_PROFILE_RELEASE_CODEGEN_UNITS", "1")
+        .env("CARGO_PROFILE_RELEASE_INCREMENTAL", "false")
 }
 
 fn profiles_dir() -> PathBuf {

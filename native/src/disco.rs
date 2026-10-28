@@ -1,5 +1,5 @@
 //! The disco ball - the native app's own. Once the music theme has played heavy bass for a few minutes, a mirror ball
-//! is lowered on its chain from the top of the screen, slowly, and hangs there, spinning, until the music ends, when it
+//! is lowered on its cable from the top of the screen, slowly, and hangs there, spinning, until the music ends, when it
 //! is drawn back up.
 //!
 //! The ball is no mesh: it is drawn per pixel over its box, the sphere worked out under each pixel - flat, seen square
@@ -10,14 +10,32 @@
 //! ball's lower half), and, in the tiles that look down, a lit dance floor that only the ball sees. Between them, sized
 //! with them, is the dark adhesive they are set in, each tile's edge a bevel that catches the light.
 //!
-//! Two lights shine on it from the eye's side: a warm white key from above, and a coloured one from the right. With a
-//! sure beat, the lights flash on each beat, the coloured one taking the palette's next colour, the key swinging from
-//! one side to the other, and the floor changing its pattern.
+//! The studio's two lights shine on it from the eye's side: a warm white key from above, and a coloured one from the
+//! right. With a sure beat, the lights flash on each beat where they stand, the coloured one taking the palette's next
+//! colour, and the floor changing its pattern.
 //!
-//! Its light goes out as sprites, worked out on the CPU from the very tiles the shader draws (their tilts too): through
-//! a hazy room, the key's beam onto the ball and the beams its tiles send back out, drifting fog in them (`discoBeams`);
-//! the spots they throw onto the scene (`discoSpots`, off by default); and over the ball a glint - a star of eight rays,
-//! the long four with a rainbow's fringe - on each tile that flashes, with a soft glow round it.
+//! What lights it is `discoLight`'s: the studio's lights and the backdrop's sun together (the default) - the sun where
+//! the backdrop's clock puts the small glow that goes round once a day, up the left in the morning, over the top at
+//! noon, down the right in the evening and below the screen at night, a light far behind the scene through that place -
+//! or the studio's lights alone, the sun alone, or the spot light the particles are lit by, where it stands in the
+//! world. Alone, the sun and the particles' light take the key's part; the coloured light stays on the ball, faintly,
+//! and sends nothing out.
+//!
+//! Its light is worked out on the CPU from the very tiles the shader draws (their tilts too): through a hazy room, the
+//! key's beam onto the ball and the beams its tiles send back out, drifting grainy fog in them (`discoBeams`); the
+//! spots they throw (`discoSpots`); and over the ball a glint - a star of eight rays, the long four with a rainbow's
+//! fringe - on each tile that flashes, with a soft glow round it. The ball is set in the world the camera sees (eye at
+//! (0, 0, 2) looking down -z, 53 degrees up and down, as the wave's and the particles'), BALL_DEPTH from the eye, the
+//! wave some ten units further. Its spots are light, as a spot light's pattern is: each lit tile's reflection is a beam,
+//! the tile's square in cross-section, spread by the light's own size, drawn on the GPU - every tile an instance - into
+//! the pattern the ball projects through a frustum round the wave (`Projector`, the wave's surface read coarsely from its vertices, `Sheet`); the wave's mesh
+//! is drawn again over the frame, each pixel's place in the world worked back from its clip space and lit by that
+//! pattern, falling off with the distance's square. A thin misty sheet, the wave scatters the light back from either
+//! side as its face turns to it, lets it through towards the eye, shows more of it seen edge on, and carries it a
+//! little way on inside, a soft glow round each square - so that a spot lies on the wave as its surface takes it, on
+//! every fold the light passes through. Some beams are followed to where they meet the wave (`Sheet::hit`) and drawn
+//! down to it through the haze. A reflection also lands, small, on a plane at the wave's middle depth, as a sprite seen
+//! only on maru-chan and, as far as `discoSpotsAir` lets it, on the backdrop.
 
 use std::f32::consts::{PI, TAU};
 
@@ -26,13 +44,36 @@ use glow::HasContext;
 use crate::gl_util::{Gl, Program, Target};
 use crate::maru::{Heard, FLOATS};
 use crate::settings::NativeSettings;
+use crate::wave::{Wave, MESH};
 
-/// The tiles' rows, from pole to pole; a row has twice as many round its equator, fewer nearer the poles.
+/// The tiles' rows, from pole to pole, at a `discoTileSize` of 1; a row has twice as many round its equator, fewer
+/// nearer the poles.
 pub const ROWS: f32 = 16.0;
+/// What the spots' brightness, `discoSpots`, is taken times: its range the panel's, 0 to 1.
+const SPOTS_SCALE: f32 = 0.25;
+/// Where the studio's key light stands across, from the ball (its light's direction's x, before it is made a unit).
+const STUDIO_KEY_X: f32 = -0.45;
 /// How far each tile is set askew, at most: its normal moved by up to this, each way.
 const ASKEW: f32 = 0.03;
+/// The camera the wave and the particles are seen by: half its vertical field of view's tangent (53 degrees), and its
+/// eye's z; the ball hangs at BALL_DEPTH.
+const TAN_HALF_FOV: f32 = 0.498_581_7;
+const EYE_Z: f32 = 2.0;
+const BALL_DEPTH: f32 = 1.25;
+/// The rows of the finer tiling the spots come from, at a `discoTileSize` of 1: a real ball's thousands of tiles, where
+/// the drawn ball has ROWS' hundreds, so that the spots lie as thick on the scene as a real ball's do.
+const SPOT_ROWS: i32 = 60;
+/// The most rows the spots' tiling has: discoTileSize's least, 0.25 - some 73,000 tiles, an instance each on the GPU.
+const SPOT_ROWS_MOST: f32 = 240.0;
+/// How fast a spot grows as its light goes, in the world's units a unit along, at a `discoTileSize` of 1: the light's
+/// own size, which blurs the tile's square as the sun's disc does a pinhole's.
+const SPREAD: f32 = 0.011;
+/// One spot in BEAM_EVERY has its beam through the haze drawn down to it; one reflection in MISS_EVERY that misses the
+/// wave, a long one out into the air.
+const BEAM_EVERY: u32 = 7;
+const MISS_EVERY: u32 = 30;
 
-// The ball over its box (`uBox`, its pixels from the bottom left), by the place each pixel is at: the chain from the
+// The ball over its box (`uBox`, its pixels from the bottom left), by the place each pixel is at: the cable from the
 // anchor at the top of the screen, its cap, then the ball over them (`uCentre`, `uRadius`), turned by its spin and
 // tilted to the eye, each pixel finding its tile as `Disco::tiles` lays them. Premultiplied, at the scene's fade.
 pub const BALL_FS: &str = "#version 330 core
@@ -49,10 +90,15 @@ uniform vec3 uL1;
 uniform vec3 uL1Colour;
 uniform vec3 uL2;
 uniform vec3 uL2Colour;
+uniform vec3 uL3;
+uniform vec3 uL3Colour;
 uniform vec4 uFloor;
 uniform float uFade;
+uniform float uRows;
+uniform vec2 uGlass;
+uniform float uSheen;
+uniform float uSamples;
 const float PI = 3.14159265;
-const float ROWS = 16.0;
 const float ASKEW = 0.03;
 const float GROUT = 0.09;
 vec3 rotX(float a, vec3 v) {
@@ -94,26 +140,43 @@ vec3 seen(vec3 r) {
   }
   return c;
 }
-void main() {
-  vec2 px = uBox.xy + vUv * uBox.zw;
+// The cable, its cap and the ball at the point `px`, premultiplied.
+vec4 shade(vec2 px) {
   vec4 o = vec4(0.0);
-  // The chain: links, a pixel or two wide, from the anchor to the ball.
+  // The cable: a glossy pearl plastic tube from the anchor to the ball, round across - dim where it faces the eye,
+  // bright at its edges by its fresnel, a faint rainbow in the rim as the XMB's glass has, and a long highlight down it
+  // from the key light's side.
   vec2 ab = uCentre - uAnchor;
   float len = max(length(ab), 1.0);
   float along = clamp(dot(px - uAnchor, ab) / (len * len), 0.0, 1.0);
-  float d = length(px - uAnchor - ab * along);
-  float width = max(1.0, uRadius * 0.011);
-  float link = 0.7 + 0.3 * step(0.5, fract(along * len / (width * 3.5)));
-  float chain = clamp(width - d + 0.5, 0.0, 1.0);
-  o = vec4(vec3(0.42, 0.43, 0.47) * link * chain, chain);
-  // The cap the chain holds, half of it showing above the ball, which lies over it.
+  vec2 off = px - uAnchor - ab * along;
+  vec2 side = vec2(-ab.y, ab.x) / len;
+  float width = max(2.0, uRadius * 0.04);
+  float across = dot(off, side) / width;
+  float cable = clamp(width - length(off) + 0.5, 0.0, 1.0);
+  if (cable > 0.0) {
+    float s = clamp(across, -1.0, 1.0);
+    float facing = sqrt(max(1.0 - s * s, 0.0));
+    float rim = pow(1.0 - facing, 3.0);
+    vec3 pearl = vec3(0.78, 0.8, 0.88);
+    vec3 rainbow = 0.75 + 0.25 * cos(6.2832 * (s * 0.6 + along * 2.0 + vec3(0.0, 0.33, 0.67)));
+    float shine = exp(-pow((s - 0.38 * sign(uL1.x + 1e-4)) / 0.2, 2.0));
+    vec3 tube = pearl * (0.2 + 0.22 * facing) + pearl * rainbow * rim * 0.9 + uL1Colour * shine * 0.85;
+    o = vec4(tube * cable, cable);
+  }
+  // The cap the cable holds, half of it showing above the ball, which lies over it: the same plastic, a little dome.
   vec2 up = normalize(uAnchor - uCentre);
   vec2 capAt = uCentre + up * uRadius;
-  float k = length(px - capAt) / (uRadius * 0.085);
+  float capR = uRadius * 0.085;
+  float k = length(px - capAt) / capR;
   if (k < 1.2) {
-    float cover = clamp((1.0 - k) * uRadius * 0.085 + 0.5, 0.0, 1.0);
-    vec3 metal = vec3(0.5, 0.51, 0.55) * (0.7 + 0.5 * dot(normalize(px - capAt + 0.001), up));
-    o = vec4(metal * cover, cover) + o * (1.0 - cover);
+    float cover = clamp((1.0 - k) * capR + 0.5, 0.0, 1.0);
+    float facing = sqrt(max(1.0 - k * k, 0.0));
+    vec2 to = (px - capAt) / capR;
+    vec3 pearl = vec3(0.78, 0.8, 0.88);
+    float shine = exp(-dot(to - vec2(-0.35, 0.35), to - vec2(-0.35, 0.35)) * 9.0);
+    vec3 dome = pearl * (0.12 + 0.2 * facing) + pearl * pow(1.0 - facing, 3.0) * 0.7 + uL1Colour * shine * 0.7;
+    o = vec4(dome * cover, cover) + o * (1.0 - cover);
   }
   // The ball.
   vec2 q = (px - uCentre) / uRadius;
@@ -123,10 +186,10 @@ void main() {
     vec3 b = rotY(-uSpin, rotX(-uTilt, n));
     float lat = asin(clamp(b.y, -1.0, 1.0));
     float lon = atan(b.z, b.x);
-    float fy = (lat / PI + 0.5) * ROWS;
-    float row = min(floor(fy), ROWS - 1.0);
-    float latc = ((row + 0.5) / ROWS - 0.5) * PI;
-    float cols = max(4.0, floor(ROWS * 2.0 * cos(latc) + 0.5));
+    float fy = (lat / PI + 0.5) * uRows;
+    float row = min(floor(fy), uRows - 1.0);
+    float latc = ((row + 0.5) / uRows - 0.5) * PI;
+    float cols = max(4.0, floor(uRows * 2.0 * cos(latc) + 0.5));
     float fx = (lon / (2.0 * PI) + 0.5) * cols;
     float col = floor(fx);
     float lonc = ((col + 0.5) / cols - 0.5) * 2.0 * PI;
@@ -140,8 +203,9 @@ void main() {
     float h = hash(rc + 0.37);
     // Where in its tile the pixel is, and how big a pixel is there, in tiles.
     vec2 inTile = vec2(fract(fx), fract(fy));
-    float tilePx = PI * uRadius / ROWS * max(n.z, 0.15);
-    float pixel = 1.0 / max(tilePx, 0.5);
+    float tilePx = PI * uRadius / uRows * max(n.z, 0.15);
+    // Its edges softened over a pixel - over a sample's share of one, supersampled.
+    float pixel = 1.0 / max(tilePx * uSamples, 0.5);
     float edge = 0.5 - max(abs(inTile.x - 0.5), abs(inTile.y - 0.5));
     // The glass: its reflection, a little brighter or darker tile by tile, faintly smudged; the lights it sends on.
     vec3 env = seen(r);
@@ -149,17 +213,37 @@ void main() {
     vec3 glass = env * (0.62 + 0.5 * h) * smudge + vec3(0.06 + 0.07 * h);
     glass += uL1Colour * pow(max(dot(r, uL1), 0.0), 60.0) * 2.6;
     glass += uL2Colour * pow(max(dot(r, uL2), 0.0), 60.0) * 2.2;
+    glass += uL3Colour * pow(max(dot(r, uL3), 0.0), 60.0) * 2.6;
     // The bevel at its edge, turned a little from the tile, catching the key light.
     float bevel = smoothstep(GROUT * 0.5 + 0.12, GROUT * 0.5, edge);
     glass += bevel * (0.05 + 0.25 * max(dot(fn, uL1), 0.0)) * (0.4 + uL1Colour * 0.3);
+    // The glass's brightness and gamma (uGlass): the reflections and the lights it catches, over the adhesive.
+    glass = pow(max(glass, vec3(0.0)), vec3(uGlass.y)) * uGlass.x;
     // The adhesive between, sized with the tiles: dark and dull, with a little of the room in it.
     vec3 adhesive = vec3(0.035, 0.035, 0.045) + env * 0.07;
     float grout = 1.0 - smoothstep(GROUT * 0.5 - 0.5 * pixel, GROUT * 0.5 + 0.5 * pixel, edge);
     vec3 c = mix(glass, adhesive, grout);
     c *= 0.5 + 0.5 * sqrt(n.z);
-    float cover = clamp((1.0 - sqrt(r2)) * uRadius + 0.5, 0.0, 1.0);
+    // The sheen (uSheen), as the Principled BSDF's: a soft light caught at grazing angles, as by a fine dust over the
+    // glass, whiter than the key and lit the more the key lies behind the edge.
+    float graze = pow(1.0 - n.z, 4.0);
+    c += uSheen * graze * (0.25 + 0.35 * max(dot(normalize(q + 1e-4), normalize(uL1.xy + 1e-4)), 0.0)) * mix(vec3(1.0), uL1Colour, 0.4);
+    float cover = clamp((1.0 - sqrt(r2)) * uRadius * uSamples + 0.5, 0.0, 1.0);
     o = vec4(c * cover, cover) + o * (1.0 - cover);
   }
+  return o;
+}
+// Supersampled (uSamples, discoBallSupersample): its shading at n x n points over each pixel, averaged.
+void main() {
+  vec2 px = uBox.xy + vUv * uBox.zw;
+  int n = int(uSamples);
+  vec4 o = vec4(0.0);
+  for (int i = 0; i < n; i++) {
+    for (int j = 0; j < n; j++) {
+      o += shade(px + (vec2(float(i), float(j)) + 0.5) / float(n) - 0.5);
+    }
+  }
+  o /= float(n * n);
   oColor = vec4(o.rgb * uFade, o.a);
 }";
 
@@ -195,6 +279,23 @@ out vec4 oColor;
 uniform float uFade;
 uniform float uTime;
 uniform float uFogScale;
+uniform sampler2D uWave;
+uniform float uWaveScale;
+uniform float uWaveUv;
+uniform vec2 uScreen;
+uniform float uAir;
+uniform vec4 uMaru;
+// How much a spot shows at this pixel. One on the wave (kind 0) is fainter where little of the wave's light lies - the
+// wave is translucent and misty, and catches it as its own light shows it; one in the open air (kind 4) shows on
+// maru-chan (uMaru, her box: centre and half sizes, in pixels) and, elsewhere, uAir of it.
+float receiver(bool onWave) {
+  float boat = 0.0;
+  if (uMaru.z > 0.0) boat = smoothstep(1.0, 0.75, length((vScreen - uMaru.xy) / uMaru.zw));
+  if (!onWave) return uAir + (1.0 - uAir) * boat;
+  vec2 code = min(texture(uWave, vScreen / uScreen * uWaveUv).rg * uWaveScale, 1.0);
+  float wave = clamp((code.r * 0.03125 + code.g * 0.5) * 7.0, 0.0, 1.0);
+  return max(0.45 + 0.55 * wave, boat);
+}
 float hash(vec2 p) {
   p = fract(p * vec2(443.897, 441.423));
   p += dot(p, p.yx + 19.19);
@@ -209,9 +310,14 @@ float noise(vec2 p) {
 void main() {
   float r = length(vUv);
   vec3 c;
-  if (vKind < 0.5) {
-    float a = smoothstep(1.0, 0.72, r) * (0.8 + 0.2 * smoothstep(0.3, 0.8, r));
-    c = vColor.rgb * a;
+  if (vKind < 0.5 || vKind > 3.5) {
+    // A tile's square, its corners a little rounded and its edges soft, as the light's own size blurs them; a touch
+    // brighter towards its rim.
+    vec2 q = abs(vUv);
+    float d = pow(pow(q.x, 6.0) + pow(q.y, 6.0), 1.0 / 6.0);
+    float soft = max(fwidth(d) * 1.5, 0.12);
+    float a = (1.0 - smoothstep(1.0 - soft, 1.0, d)) * (0.85 + 0.15 * smoothstep(0.3, 0.9, d));
+    c = vColor.rgb * a * receiver(vKind < 0.5);
   } else if (vKind < 1.5) {
     float core = exp(-r * r * 70.0) * 2.2;
     float halo = exp(-r * 5.5) * 0.2;
@@ -230,9 +336,149 @@ void main() {
     float fall = exp(-along * vFall) * smoothstep(0.0, 0.05, along) * smoothstep(1.0, 0.8, along);
     vec2 f = vScreen / uFogScale;
     float fog = 0.35 + 0.45 * noise(f + vec2(uTime * 0.06, uTime * 0.02)) + 0.2 * noise(f * 2.3 - vec2(uTime * 0.09, 0.0));
+    // The haze's grain: the light catching its motes here and not there, from frame to frame.
+    fog *= 0.86 + 0.28 * hash(floor(gl_FragCoord.xy * 0.5) + fract(uTime * 7.31) * 113.0);
     c = vColor.rgb * body * fall * fog;
   }
   oColor = vec4(c * vColor.a * uFade, 0.0);
+}";
+
+// The pattern the ball projects, drawn on the GPU: an instance a tile of the spots' tiling (aTile: its latitude and
+// longitude, its normal set askew; aMore: the rest of it, then its tint under each light, packed 0xRRGGBB), a quad each
+// (aCorner, -1 to 1). Each is turned with the ball (uTurnX..Z, the turn's columns), its light (uLight) reflected, and
+// its square - the tile's sides across the beam, foreshortened, spread by the light's own size (uLook.x) - seen from the
+// ball through the frustum (uPX..uPZ, uRange); a tile the light does not reach, or whose beam misses the frustum, is
+// drawn nowhere. Its colour is the light's, a share (uLook.z) of it its tint, as the studio's gels colour it, at the
+// spots' strength (uLook.y). Added into the pattern, a half-float target.
+pub const GOBO_VS: &str = "#version 330 core
+in vec2 aCorner;
+in vec4 aTile;
+in vec4 aMore;
+uniform vec3 uTurnX;
+uniform vec3 uTurnY;
+uniform vec3 uTurnZ;
+uniform vec3 uLight;
+uniform vec3 uLightColour;
+uniform float uWhich;
+uniform vec3 uLook;
+uniform vec3 uPX;
+uniform vec3 uPY;
+uniform vec3 uPZ;
+uniform vec4 uRange;
+out vec2 vUv;
+out vec3 vColour;
+vec3 turn(vec3 v) {
+  return uTurnX * v.x + uTurnY * v.y + uTurnZ * v.z;
+}
+vec3 unpack(float f) {
+  int v = int(f + 0.5);
+  return vec3(float((v >> 16) & 255), float((v >> 8) & 255), float(v & 255)) / 255.0;
+}
+void main() {
+  vec3 n = turn(vec3(aTile.zw, aMore.x));
+  float lit = dot(n, uLight);
+  vec3 d = 2.0 * lit * n - uLight;
+  float z = dot(d, uPZ);
+  vec2 mid = (vec2(dot(d, uPX), dot(d, uPY)) / max(z, 1e-4) - uRange.xy) / (uRange.zw - uRange.xy) * 2.0 - 1.0;
+  vUv = aCorner;
+  vColour = vec3(0.0);
+  if (lit < 0.05 || z <= 0.02 || abs(mid.x) > 1.1 || abs(mid.y) > 1.1) {
+    gl_Position = vec4(2.0, 2.0, 2.0, 1.0);
+    return;
+  }
+  float lat = aTile.x;
+  float lon = aTile.y;
+  vec3 east = turn(vec3(-sin(lon), 0.0, cos(lon)));
+  vec3 north = turn(vec3(-sin(lat) * cos(lon), cos(lat), -sin(lat) * sin(lon)));
+  vec3 a1 = east - d * dot(east, d);
+  vec3 a2 = north - d * dot(north, d);
+  float l1 = length(a1);
+  float l2 = length(a2);
+  a1 *= (0.5 + 0.5 * l1) * uLook.x / max(l1, 1e-4);
+  a2 *= (0.5 + 0.5 * l2) * uLook.x / max(l2, 1e-4);
+  vec3 c = d + a1 * aCorner.x + a2 * aCorner.y;
+  float cz = dot(c, uPZ);
+  if (cz <= 0.02) {
+    gl_Position = vec4(2.0, 2.0, 2.0, 1.0);
+    return;
+  }
+  vec2 at = (vec2(dot(c, uPX), dot(c, uPY)) / cz - uRange.xy) / (uRange.zw - uRange.xy) * 2.0 - 1.0;
+  float tint = uWhich < 0.5 ? aMore.y : (uWhich < 1.5 ? aMore.z : aMore.w);
+  vColour = mix(uLightColour, unpack(tint), uLook.z) * uLook.y * min(lit, 1.0);
+  gl_Position = vec4(at, 0.0, 1.0);
+}";
+
+pub const GOBO_FS: &str = "#version 330 core
+in vec2 vUv;
+in vec3 vColour;
+out vec4 oColor;
+void main() {
+  // A tile's square, its corners a little rounded and its edges soft, a touch brighter towards its rim.
+  vec2 q = abs(vUv);
+  float d = pow(pow(q.x, 6.0) + pow(q.y, 6.0), 1.0 / 6.0);
+  float soft = max(fwidth(d) * 1.5, 0.12);
+  float a = (1.0 - smoothstep(1.0 - soft, 1.0, d)) * (0.85 + 0.15 * smoothstep(0.3, 0.9, d));
+  oColor = vec4(vColour * a, 0.0);
+}";
+
+// The wave lit by the ball: its mesh drawn again, each pixel's place in the world worked back from the clip space it
+// comes in (uClip: the camera's p11 - its p00 that over the aspect - the eye's z, and the aspect),
+// and lit by the pattern the ball projects (`uGobo`, through the frustum `uBall`, `uPX`..`uPZ`, `uRange`), its light
+// falling off as the square of the distance. The wave is a thin, misty sheet: it scatters the light back, from either
+// side, as its face turns to it; lets it through, the more the nearer the light's way runs to the eye's; and, seen
+// edge on, shows more of it, as its mist lies deeper along the eye's line; and its mist carries the light a little
+// way on inside it, a soft glow round each square. Its normal is the surface's own, from how its
+// place moves across the pixels.
+pub const LIT_VS: &str = "#version 330 core
+in vec4 aPos;
+in vec4 aNormal;
+in vec2 aUv;
+uniform vec3 uClip;
+uniform vec2 uDolly;
+out vec3 vWorld;
+void main() {
+  float p11 = uClip.x;
+  vWorld = vec3(aPos.x * uClip.z / p11, aPos.y / p11, uClip.y - aPos.w);
+  gl_Position = vec4(aPos.xy, aPos.z + uDolly.x, aPos.w - uDolly.y);
+}";
+
+pub const LIT_FS: &str = "#version 330 core
+in vec3 vWorld;
+out vec4 oColor;
+uniform sampler2D uGobo;
+uniform vec3 uBall;
+uniform vec3 uPX;
+uniform vec3 uPY;
+uniform vec3 uPZ;
+uniform vec4 uRange;
+uniform vec3 uClip;
+uniform float uGain;
+uniform float uReach;
+uniform float uFade;
+void main() {
+  vec3 world = vWorld;
+  vec3 toP = world - uBall;
+  float d2 = max(dot(toP, toP), 0.04);
+  vec3 l = toP * inversesqrt(d2);
+  float z = dot(l, uPZ);
+  if (z <= 0.02) discard;
+  vec2 uv = (vec2(dot(l, uPX), dot(l, uPY)) / z - uRange.xy) / (uRange.zw - uRange.xy);
+  if (any(lessThan(uv, vec2(0.0))) || any(greaterThan(uv, vec2(1.0)))) discard;
+  vec3 g = texture(uGobo, uv).rgb;
+  // The mist carries some of it on inside the sheet, a soft glow round each square: the pattern read along a spiral
+  // out to a square's width round it, the golden angle apart, so that its taps blend rather than echo the square.
+  vec3 glow = vec3(0.0);
+  for (int i = 0; i < 16; i++) {
+    float a = float(i) * 2.39996;
+    glow += texture(uGobo, uv + vec2(cos(a), sin(a)) * sqrt((float(i) + 0.5) / 16.0) * (12.0 / 1024.0)).rgb;
+  }
+  g += glow * (0.5 / 16.0);
+  vec3 n = normalize(cross(dFdx(world), dFdy(world)));
+  vec3 v = normalize(vec3(0.0, 0.0, uClip.y) - world);
+  float back = abs(dot(n, l));
+  float through = pow(max(dot(l, v), 0.0), 6.0);
+  float mist = clamp(0.6 / max(abs(dot(n, v)), 0.05), 1.0, 3.0);
+  oColor = vec4(g * (uGain * uReach / d2) * (0.6 * back + 0.9 * through) * mist * uFade, 0.0);
 }";
 
 /// The ball's place on a frame, in its pixels from the bottom left.
@@ -243,8 +489,14 @@ pub struct Ball {
     pub anchor: [f32; 2],
     pub spin: f32,
     pub tilt: f32,
-    /// Its box, the chain's included, held to the screen: x, y, w, h.
+    /// Its box, the cable's included, held to the screen: x, y, w, h.
     pub area: [i32; 4],
+    /// Its tiles' rows, the glass's brightness and gamma, and its sheen.
+    pub rows: f32,
+    pub glass: [f32; 2],
+    pub sheen: f32,
+    /// Its shading's samples a pixel each way (discoBallSupersample).
+    pub samples: f32,
 }
 
 /// The two lights, towards them from the ball, with their colours (their brightness in them); the dance floor's
@@ -254,6 +506,9 @@ pub struct Lights {
     pub key_colour: [f32; 3],
     pub side: [f32; 3],
     pub side_colour: [f32; 3],
+    /// The sun beside the studio's lights (`discoLight`'s Studio lights & the sun); black otherwise.
+    pub sun: [f32; 3],
+    pub sun_colour: [f32; 3],
     pub floor: [f32; 4],
     pub time: f32,
 }
@@ -269,6 +524,12 @@ pub struct Frame<'a> {
     pub height: i32,
     /// The particles' iridescent palette, which colours its light.
     pub palette: &'a [u32],
+    /// The backdrop's sun on the screen (its 0..1, from the bottom left; it goes off the screen), and the particles'
+    /// spot light in the world.
+    pub sun: [f32; 2],
+    pub spot_light: [f32; 3],
+    /// Maru-chan's box on the screen (x0, y0, x1, y1, from -1 to 1), while she sails.
+    pub maru: Option<[f32; 4]>,
 }
 
 pub struct Disco {
@@ -278,17 +539,16 @@ pub struct Disco {
     dropped: bool,
     by_hand: bool,
     music_was: bool,
-    /// How far down it is (0 out of sight, 1 hanging); its spin; its swing on the chain and how fast it swings.
+    /// How far down it is (0 out of sight, 1 hanging); its spin; its swing on the cable and how fast it swings.
     pub down: f32,
     pub spin: f32,
     swing: f32,
     swing_speed: f32,
     kicks: Option<u64>,
-    /// The beat: its phase last seen, the beats counted, when the last came; the key light's side, eased.
+    /// The beat: its phase last seen, the beats counted, when the last came; the coloured light's colour, eased.
     phase: f32,
     beats: u64,
     beat_at: f64,
-    key_x: f32,
     side_colour: [f32; 3],
     /// The frame's ball, and its sprites, `FLOATS` a corner: what lies under the ball first (the beams and the spots),
     /// `under` corners of them, then the glints and the glow over it.
@@ -296,6 +556,29 @@ pub struct Disco {
     pub lights: Lights,
     pub out: Vec<f32>,
     pub under: usize,
+    /// The spots' receivers: the open air's share, and maru-chan's box in pixels (centre, half sizes; 0 sizes none).
+    pub air: f32,
+    pub maru: [f32; 4],
+    /// The wave as the spots land on it, read again each frame they are worked out.
+    sheet: Sheet,
+    /// The spots' tiling, laid for its rows.
+    spot_table: (i32, Vec<SpotTile>),
+    /// The pattern the ball projects: the frustum it is drawn through, and where its corners start in `out`.
+    pub projector: Option<Projector>,
+    /// The spots' tiling as the GPU draws it, an instance a tile (`instances`, two vec4s each: its latitude and
+    /// longitude, its normal set askew, and its tint under each light, packed), made again - `instances_version` moving
+    /// on - when the tiling or the palette changes; the palette it was tinted for. What each frame's pattern is drawn
+    /// with: the lights that send one, the ball's turn (its columns), and the spots' spread, strength and gels' share.
+    pub instances: Vec<[f32; 8]>,
+    pub instances_version: u64,
+    palette_seen: Vec<u32>,
+    pub gobo_lights: Vec<([f32; 3], [f32; 3])>,
+    pub gobo_turn: [[f32; 3]; 3],
+    pub gobo_look: [f32; 3],
+    /// The tiles the CPU follows for the beams and the spots in the air: a sample as large whatever their size.
+    spot_sample: Vec<usize>,
+    /// The frame's width over its height.
+    aspect: f32,
 }
 
 impl Default for Disco {
@@ -313,12 +596,24 @@ impl Default for Disco {
             phase: 0.0,
             beats: 0,
             beat_at: -10.0,
-            key_x: -0.45,
             side_colour: [1.0, 0.6, 0.9],
             ball: None,
-            lights: Lights { key: [0.0, 0.0, 1.0], key_colour: [1.0; 3], side: [0.0, 0.0, 1.0], side_colour: [1.0; 3], floor: [0.0; 4], time: 0.0 },
+            lights: Lights { key: [0.0, 0.0, 1.0], key_colour: [1.0; 3], side: [0.0, 0.0, 1.0], side_colour: [1.0; 3], sun: [0.0, 0.0, 1.0], sun_colour: [0.0; 3], floor: [0.0; 4], time: 0.0 },
             out: Vec::new(),
             under: 0,
+            air: 0.0,
+            maru: [0.0; 4],
+            sheet: Sheet::default(),
+            spot_table: (0, Vec::new()),
+            projector: None,
+            instances: Vec::new(),
+            instances_version: 0,
+            palette_seen: Vec::new(),
+            gobo_lights: Vec::new(),
+            gobo_turn: [[0.0; 3]; 3],
+            gobo_look: [0.0; 3],
+            spot_sample: Vec::new(),
+            aspect: 1.0,
         }
     }
 }
@@ -329,6 +624,16 @@ fn norm(v: [f32; 3]) -> [f32; 3] {
 }
 fn dot(a: [f32; 3], b: [f32; 3]) -> f32 {
     a[0] * b[0] + a[1] * b[1] + a[2] * b[2]
+}
+fn sub(a: [f32; 3], b: [f32; 3]) -> [f32; 3] {
+    [a[0] - b[0], a[1] - b[1], a[2] - b[2]]
+}
+/// a + b k.
+fn along(a: [f32; 3], b: [f32; 3], k: f32) -> [f32; 3] {
+    [a[0] + b[0] * k, a[1] + b[1] * k, a[2] + b[2] * k]
+}
+fn cross(a: [f32; 3], b: [f32; 3]) -> [f32; 3] {
+    [a[1] * b[2] - a[2] * b[1], a[2] * b[0] - a[0] * b[2], a[0] * b[1] - a[1] * b[0]]
 }
 fn rot_x(a: f32, v: [f32; 3]) -> [f32; 3] {
     let (s, c) = a.sin_cos();
@@ -358,6 +663,187 @@ fn hash(a: u32) -> u32 {
     x = x.wrapping_mul(0x2c1b_3c6d);
     x ^ (x >> 13)
 }
+/// Which of the palette's `len` colours tints tile `id`'s light under light `k`.
+fn tint_pick(id: u32, k: usize, len: usize) -> usize {
+    ((hash(id * 2 + k as u32) % 1000) as f32 / 1000.0 * len as f32) as usize % len.max(1)
+}
+
+/// A colour as a float the GPU unpacks again: its bytes, 0xRRGGBB, a whole number below 2^24, which a float holds
+/// exactly.
+fn pack(c: [f32; 3]) -> f32 {
+    let [r, g, b] = c.map(|v| (v.clamp(0.0, 1.0) * 255.0).round() as u32);
+    ((r << 16) | (g << 8) | b) as f32
+}
+
+/// One tile of the spots' tiling: its number, its normal, the same askew, and its square's two sides.
+type SpotTile = (u32, [f32; 3], [f32; 3], [f32; 3], [f32; 3]);
+
+/// The wave as the spots land on it: its surface in the world, read coarsely - every eighth of its vertices each way,
+/// SHEET quads by SHEET - with a box round each run of CHUNK quads along a row, and one round them all, so that a ray
+/// tries only the quads it passes near.
+#[derive(Default)]
+pub struct Sheet {
+    points: Vec<[f32; 3]>,
+    chunks: Vec<([f32; 3], [f32; 3])>,
+    all: ([f32; 3], [f32; 3]),
+}
+
+const SHEET: usize = 16;
+const CHUNK: usize = 4;
+
+/// The frustum the ball's light is drawn into, as a spot light's pattern is: from the ball, along its axes, the
+/// tangents from `lo` to `hi` across them - just round the wave, so that the pattern's texels go where the light can
+/// land.
+#[derive(Clone, Copy)]
+pub struct Projector {
+    pub ball: [f32; 3],
+    pub axes: [[f32; 3]; 3],
+    pub lo: [f32; 2],
+    pub hi: [f32; 2],
+    /// The distance's square to the middle of the wave, which the light's falloff is measured against, and the
+    /// middle's depth.
+    pub reach: f32,
+    pub depth: f32,
+}
+
+/// The widest the frustum goes, as a tangent: 75 degrees from its axis.
+const PROJECTOR_REACH: f32 = 3.7;
+
+/// Whether a ray from `from` along `d` passes through the box from `lo` to `hi` before `limit`.
+fn slab(from: [f32; 3], d: [f32; 3], (lo, hi): ([f32; 3], [f32; 3]), limit: f32) -> bool {
+    let (mut t0, mut t1) = (0.0f32, limit);
+    for i in 0..3 {
+        if d[i].abs() < 1e-7 {
+            if from[i] < lo[i] || from[i] > hi[i] {
+                return false;
+            }
+            continue;
+        }
+        let (a, b) = ((lo[i] - from[i]) / d[i], (hi[i] - from[i]) / d[i]);
+        t0 = t0.max(a.min(b));
+        t1 = t1.min(a.max(b));
+    }
+    t0 <= t1
+}
+
+impl Sheet {
+    /// This frame's wave, its vertices taken back into the world as the particles' emitter takes them.
+    fn read(&mut self, wave: &mut Wave, aspect: f32) {
+        let p11 = 1.0 / TAN_HALF_FOV;
+        let p00 = p11 / aspect;
+        let at = |i: usize| (i * 8).min(MESH - 1);
+        self.points.clear();
+        for iy in 0..=SHEET {
+            for ix in 0..=SHEET {
+                let v = wave.vertex(at(ix), at(iy));
+                self.points.push([v[0] / p00, v[1] / p11, EYE_Z - v[3]]);
+            }
+        }
+        self.chunks.clear();
+        let n = SHEET + 1;
+        let mut all = ([f32::MAX; 3], [f32::MIN; 3]);
+        for iy in 0..SHEET {
+            for cx in (0..SHEET).step_by(CHUNK) {
+                let (mut lo, mut hi) = ([f32::MAX; 3], [f32::MIN; 3]);
+                for row in [iy, iy + 1] {
+                    for p in &self.points[row * n + cx..=row * n + cx + CHUNK] {
+                        for k in 0..3 {
+                            lo[k] = lo[k].min(p[k]);
+                            hi[k] = hi[k].max(p[k]);
+                        }
+                    }
+                }
+                for k in 0..3 {
+                    all.0[k] = all.0[k].min(lo[k]);
+                    all.1[k] = all.1[k].max(hi[k]);
+                }
+                self.chunks.push((lo, hi));
+            }
+        }
+        self.all = all;
+    }
+
+    /// The frustum from `ball` round the wave: along the way to its middle, as wide as its points lie.
+    fn projector(&self, ball: [f32; 3]) -> Option<Projector> {
+        if self.points.is_empty() {
+            return None;
+        }
+        let mut mid = [0.0f32; 3];
+        for p in &self.points {
+            mid = along(mid, *p, 1.0 / self.points.len() as f32);
+        }
+        let z = norm(sub(mid, ball));
+        let up = if z[1].abs() > 0.9 { [0.0, 0.0, 1.0] } else { [0.0, 1.0, 0.0] };
+        let x = norm(cross(up, z));
+        let y = cross(z, x);
+        let (mut lo, mut hi) = ([f32::MAX; 2], [f32::MIN; 2]);
+        for p in &self.points {
+            let v = sub(*p, ball);
+            let (a, b, c) = (dot(v, x), dot(v, y), dot(v, z));
+            let s = if c > 0.05 * dot(v, v).sqrt() {
+                [a / c, b / c].map(|t| t.clamp(-PROJECTOR_REACH, PROJECTOR_REACH))
+            } else {
+                [a.signum() * PROJECTOR_REACH, b.signum() * PROJECTOR_REACH]
+            };
+            for i in 0..2 {
+                lo[i] = lo[i].min(s[i]);
+                hi[i] = hi[i].max(s[i]);
+            }
+        }
+        // A margin, for the wave between the points read.
+        for i in 0..2 {
+            let m = 0.06 * (hi[i] - lo[i]) + 0.02;
+            lo[i] = (lo[i] - m).max(-PROJECTOR_REACH);
+            hi[i] = (hi[i] + m).min(PROJECTOR_REACH);
+        }
+        let to_mid = sub(mid, ball);
+        Some(Projector { ball, axes: [x, y, z], lo, hi, reach: dot(to_mid, to_mid), depth: mid[2] })
+    }
+
+    /// Where a ray from `from` along `d` first meets the wave: how far along, and the surface's normal there.
+    fn hit(&self, from: [f32; 3], d: [f32; 3]) -> Option<(f32, [f32; 3])> {
+        if self.chunks.is_empty() || !slab(from, d, self.all, f32::MAX) {
+            return None;
+        }
+        let n = SHEET + 1;
+        let mut best: Option<(f32, [f32; 3])> = None;
+        for (k, &bounds) in self.chunks.iter().enumerate() {
+            if !slab(from, d, bounds, best.map_or(f32::MAX, |b| b.0)) {
+                continue;
+            }
+            let (iy, cx) = (k / (SHEET / CHUNK), k % (SHEET / CHUNK) * CHUNK);
+            let row = &self.points[iy * n..(iy + 2) * n];
+            for ix in cx..cx + CHUNK {
+                let (a, b, c, e) = (row[ix], row[ix + 1], row[n + ix + 1], row[n + ix]);
+                for (p, q, r) in [(a, b, c), (a, c, e)] {
+                    // Moller and Trumbore's test.
+                    let (e1, e2) = (sub(q, p), sub(r, p));
+                    let h = cross(d, e2);
+                    let det = dot(e1, h);
+                    if det.abs() < 1e-9 {
+                        continue;
+                    }
+                    let s = sub(from, p);
+                    let u = dot(s, h) / det;
+                    if !(0.0..=1.0).contains(&u) {
+                        continue;
+                    }
+                    let qv = cross(s, e1);
+                    let v = dot(d, qv) / det;
+                    if v < 0.0 || u + v > 1.0 {
+                        continue;
+                    }
+                    let t = dot(e2, qv) / det;
+                    if t > 1e-4 && t < best.map_or(f32::MAX, |b| b.0) {
+                        best = Some((t, norm(cross(e1, e2))));
+                    }
+                }
+            }
+        }
+        best
+    }
+}
+
 /// A colour's saturation raised, as a coloured gel's would be.
 fn gel(c: [f32; 3]) -> [f32; 3] {
     let grey = (c[0] + c[1] + c[2]) / 3.0;
@@ -390,11 +876,10 @@ impl Disco {
 
     /// The tiles, as the ball's shader lays them: each one's number, its normal on the ball, unturned, and the same set
     /// a hair askew, as the shader sets it.
-    fn tiles(mut f: impl FnMut(u32, [f32; 3], [f32; 3])) {
-        let rows = ROWS as i32;
-        for row in 0..rows {
-            let latc = ((row as f32 + 0.5) / ROWS - 0.5) * PI;
-            let cols = (ROWS * 2.0 * latc.cos() + 0.5).floor().max(4.0) as i32;
+    fn tiles(rows: f32, mut f: impl FnMut(u32, [f32; 3], [f32; 3])) {
+        for row in 0..rows as i32 {
+            let latc = ((row as f32 + 0.5) / rows - 0.5) * PI;
+            let cols = (rows * 2.0 * latc.cos() + 0.5).floor().max(4.0) as i32;
             for col in 0..cols {
                 let lonc = ((col as f32 + 0.5) / cols as f32 - 0.5) * TAU;
                 let n = [latc.cos() * lonc.cos(), latc.sin(), latc.cos() * lonc.sin()];
@@ -406,7 +891,41 @@ impl Disco {
         }
     }
 
-    pub fn update(&mut self, f: &Frame) {
+    /// Tints each instance under each light from `palette`, as the studio's gels colour it.
+    fn tint_instances(table: &[SpotTile], instances: &mut [[f32; 8]], palette: &[[f32; 3]]) {
+        for (t, inst) in table.iter().zip(instances.iter_mut()) {
+            for k in 0..3 {
+                inst[5 + k] = pack(gel(palette[tint_pick(t.0, k, palette.len())]));
+            }
+        }
+    }
+
+    /// The finer tiling the spots come from, laid as `tiles` lays the drawn one, `rows` rows: each one's number, its
+    /// normal on the ball, the same set a hair askew, and its square's two sides, along its row and across it - laid
+    /// once for its rows (`spot_table`).
+    fn lay_spot_tiles(rows: i32) -> Vec<SpotTile> {
+        let mut table = Vec::new();
+        let count = rows;
+        let rows = count as f32;
+        for row in 0..count {
+            let latc = ((row as f32 + 0.5) / rows - 0.5) * PI;
+            let cols = (rows * 2.0 * latc.cos() + 0.5).floor().max(4.0) as i32;
+            for col in 0..cols {
+                let lonc = ((col as f32 + 0.5) / cols as f32 - 0.5) * TAU;
+                let n = [latc.cos() * lonc.cos(), latc.sin(), latc.cos() * lonc.sin()];
+                let id = (row * 256 + col) as u32;
+                let askew = [0, 1, 2].map(|i| (hash(id * 3 + i) % 1000) as f32 / 1000.0 - 0.5);
+                let tilted = norm([n[0] + askew[0] * 2.0 * ASKEW, n[1] + askew[1] * 2.0 * ASKEW, n[2] + askew[2] * 2.0 * ASKEW]);
+                let east = [-lonc.sin(), 0.0, lonc.cos()];
+                let north = [-latc.sin() * lonc.cos(), latc.cos(), -latc.sin() * lonc.sin()];
+                table.push((id, n, tilted, east, north));
+            }
+        }
+        table
+    }
+
+    /// Moves it on a frame, the spots landing on the frame's `wave`.
+    pub fn update(&mut self, f: &Frame, wave: &mut Wave) {
         let s = f.settings;
         let dt = f.dt.clamp(0.0, 0.1) as f32;
         // Heavy bass, while the music plays, adds up; anything else drains it, at half the pace.
@@ -421,7 +940,9 @@ impl Disco {
         if s.disco_ball == 0.0 {
             self.dropped = false;
             self.by_hand = false;
-        } else if !self.dropped && f.music && self.heavy >= s.disco_after_min.max(0.0) * 60.0 {
+        // Down once the music has had its heavy bass - or at once with discoWithMusic - and, should the music come back
+        // while it is still going up, down again at once: the bass is asked for only once it is all the way up.
+        } else if !self.dropped && f.music && (s.disco_with_music != 0.0 || self.down > 0.0 || self.heavy >= s.disco_after_min.max(0.0) * 60.0) {
             self.dropped = true;
             if self.down <= 0.0 {
                 self.swing = 0.12;
@@ -433,17 +954,18 @@ impl Disco {
         self.down = if self.dropped {
             (self.down + dt / s.disco_descend_sec.max(0.5) as f32).min(1.0)
         } else {
-            (self.down - dt / 4.0).max(0.0)
+            (self.down - dt / s.disco_rise_sec.max(0.5) as f32).max(0.0)
         };
         self.out.clear();
         self.under = 0;
         self.ball = None;
+        self.projector = None;
         if self.down <= 0.0 || f.width <= 0 || f.height <= 0 {
             self.swing = 0.0;
             self.swing_speed = 0.0;
             return;
         }
-        // It swings on its chain, a pendulum of about three seconds, nudged by each kick.
+        // It swings on its cable, a pendulum of about three seconds, nudged by each kick.
         let kicked = f.heard.listening && self.kicks.is_some_and(|k| f.heard.kicks > k);
         self.kicks = f.heard.listening.then_some(f.heard.kicks);
         if kicked {
@@ -464,11 +986,9 @@ impl Disco {
         self.phase = phase;
         let since = (f.now - self.beat_at) as f32;
         let pulse = 1.0 + 0.9 * beat_lights.min(1.5) * (-since * 6.0).exp();
-        // On each beat the key swings to the other side and the coloured light takes the palette's next colour; without
-        // a beat they stay, the colour moving slowly round the palette.
+        // On each beat the lights flash where they stand and the coloured light takes the palette's next colour; without
+        // a beat the colour moves slowly round the palette.
         let beating = beat_lights > 0.05;
-        let key_target = if beating && self.beats % 2 == 1 { 0.45 } else { -0.45 };
-        self.key_x += (key_target - self.key_x) * (1.0 - (-dt * 14.0).exp());
         let pick = if beating { self.beats as usize } else { (f.now * 0.05) as usize } % palette.len();
         let target = palette[pick].map(|v| 0.35 + 0.65 * v);
         let rate = if beating { 25.0 } else { 0.5 };
@@ -480,7 +1000,8 @@ impl Disco {
         let radius = (s.disco_size_px.max(8.0) as f32) * 0.5;
         let anchor_x = (s.disco_x.clamp(0.0, 1.0) as f32 * w).clamp(radius, (w - radius).max(radius));
         let rest = radius + 0.09 * h + 30.0;
-        let eased = 1.0 - (1.0 - self.down).powi(3);
+        // It comes down and goes up at an even pace, as a motor winds its cable.
+        let eased = self.down;
         let hang = -radius * 1.2 + (rest + radius * 1.2) * eased;
         let (sw, cw) = self.swing.sin_cos();
         // From the top, then turned over to GL's pixels, from the bottom left.
@@ -491,15 +1012,65 @@ impl Disco {
         let x0 = (centre[0].min(anchor_x) - reach).floor().clamp(0.0, w);
         let x1 = (centre[0].max(anchor_x) + reach).ceil().clamp(0.0, w);
         let y0 = (centre[1] - reach).floor().clamp(0.0, h);
-        let ball = Ball { centre, radius, anchor, spin: self.spin, tilt, area: [x0 as i32, y0 as i32, (x1 - x0) as i32, (h - y0) as i32] };
+        // Its tiles' size: the drawn ball's rows and the spots' tiling's, and how fast the spots grow, with them.
+        let size = s.disco_tile_size.clamp(0.25, 4.0) as f32;
+        let rows = (ROWS / size).round().clamp(4.0, 64.0);
+        let spot_rows = (SPOT_ROWS as f32 / size).round().clamp(12.0, SPOT_ROWS_MOST) as i32;
+        let spread = SPREAD * size;
+        if self.spot_table.0 != spot_rows {
+            self.spot_table = (spot_rows, Self::lay_spot_tiles(spot_rows));
+            let table = &self.spot_table.1;
+            self.instances = table
+                .iter()
+                .map(|&(_, n, tilted, ..)| [n[1].clamp(-1.0, 1.0).asin(), n[2].atan2(n[0]), tilted[0], tilted[1], tilted[2], 0.0, 0.0, 0.0])
+                .collect();
+            Self::tint_instances(table, &mut self.instances, &palette);
+            self.instances_version += 1;
+            // The sample: one tile in as many as the tiling has more than at a discoTileSize of 1.
+            let every = ((spot_rows as f32 / SPOT_ROWS as f32).powi(2)).max(1.0).round() as u32;
+            self.spot_sample = (0..table.len()).filter(|&i| hash(table[i].0 * 11 + 5).is_multiple_of(every)).collect();
+        }
+        let glass = [s.disco_glass_brightness.max(0.0) as f32, s.disco_glass_gamma.clamp(0.1, 5.0) as f32];
+        let ball = Ball {
+            centre,
+            radius,
+            anchor,
+            spin: self.spin,
+            tilt,
+            area: [x0 as i32, y0 as i32, (x1 - x0) as i32, (h - y0) as i32],
+            rows,
+            glass,
+            sheen: s.disco_sheen.max(0.0) as f32,
+            samples: s.disco_ball_supersample.round().clamp(1.0, 4.0) as f32,
+        };
         self.ball = Some(ball);
 
-        let key = norm([self.key_x, 0.55, 0.75]);
+        // The ball in the world, at BALL_DEPTH, where it is on the screen.
+        let aspect = w / h;
+        self.aspect = aspect;
+        let depth = EYE_Z - BALL_DEPTH;
+        let at = [(centre[0] / w * 2.0 - 1.0) * TAN_HALF_FOV * aspect * depth, (centre[1] / h * 2.0 - 1.0) * TAN_HALF_FOV * depth, BALL_DEPTH];
+        let mode = s.disco_light.round() as i32;
+        // The sun, far behind the scene, through its place on the screen; the studio's key, a warm white from above.
+        let sun = norm([(2.0 * f.sun[0] - 1.0) * TAN_HALF_FOV * aspect, (2.0 * f.sun[1] - 1.0) * TAN_HALF_FOV, -1.0]);
+        let studio_key = norm([STUDIO_KEY_X, 0.55, 0.75]);
+        let key = match mode {
+            1 => sun,
+            // The particles' spot light, where it stands.
+            2 => norm([f.spot_light[0] - at[0], f.spot_light[1] - at[1], f.spot_light[2] - at[2]]),
+            _ => studio_key,
+        };
+        // The studio's lights: alone, or with the sun beside them.
+        let studio = mode == 0 || mode == 3;
+        let with_sun = mode == 3;
         let side = norm([0.65, 0.15, 0.75]);
-        let key_colour = [1.0 * pulse, 0.96 * pulse, 0.9 * pulse];
-        let side_colour = self.side_colour.map(|c| c * pulse);
+        let warm = [1.0 * pulse, 0.95 * pulse, 0.86 * pulse];
+        let key_colour = if studio { [1.0 * pulse, 0.96 * pulse, 0.9 * pulse] } else { warm };
+        // Under the sun alone or the particles' light, the coloured light only tints the ball.
+        let side_colour = self.side_colour.map(|c| c * pulse * if studio { 1.0 } else { 0.35 });
+        let sun_colour = if with_sun { warm } else { [0.0; 3] };
         let floor = [self.beats as f32 % 64.0, 0.22 * s.disco_floor.max(0.0) as f32 * (0.7 + 0.3 * pulse), 0.0, 0.0];
-        self.lights = Lights { key, key_colour, side, side_colour, floor, time: (f.now % 1000.0) as f32 };
+        self.lights = Lights { key, key_colour, side, side_colour, sun, sun_colour, floor, time: (f.now % 1000.0) as f32 };
 
         let fade = eased;
         let mut out = std::mem::take(&mut self.out);
@@ -518,73 +1089,158 @@ impl Disco {
                 corner(out, w, h, quad[i].0, quad[i].1, 3.0, fall, colour, strength);
             }
         };
-        let turn = |n: [f32; 3]| rot_x(tilt, rot_y(self.spin, n));
-        let lights = [(key, [1.0, 0.96, 0.9]), (side, self.side_colour)];
+        // The ball's turn - its spin, then its tilt to the eye - as a matrix's columns, worked out once a frame.
+        let columns = [[1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0]].map(|e| rot_x(tilt, rot_y(self.spin, e)));
+        let turn = |n: [f32; 3]| [0, 1, 2].map(|i| columns[0][i] * n[0] + columns[1][i] * n[1] + columns[2][i] * n[2]);
+        // What sends light out: both studio lights, or the sun's or the particles' light alone.
+        let all = [(key, [1.0, 0.96, 0.9]), (side, self.side_colour), (sun, [1.0, 0.95, 0.86])];
+        let lights = if with_sun { &all[..] } else if studio { &all[..2] } else { &all[..1] };
+        // The spots' colour: the studio's gels, or mostly the light's own.
+        let gel_share = if studio { 0.65 } else { 0.25 };
         let beams = s.disco_beams.max(0.0) as f32;
-        let spots = s.disco_spots.max(0.0) as f32;
-        let tile_px = PI * radius / ROWS;
+        let spots = s.disco_spots.max(0.0) as f32 * SPOTS_SCALE;
+        let tile_px = PI * radius / rows;
         if beams > 0.0 {
             // The key's beam, onto the ball from up out of the screen.
             let towards = norm([key[0], key[1], 0.0]);
             beam(&mut out, centre, [towards[0], towards[1]], 1.6 * h, radius * 0.9, radius * 1.6, 0.4, [1.0, 0.97, 0.92], 0.05 * beams * pulse * fade);
         }
-        // What each lit tile sends back out: through the haze as a beam - a quarter of the tiles, so that each shows -
-        // and as a spot on the scene behind, where it lands there.
+        // What each lit tile of the finer tiling sends back out. Its reflection is a beam of light from the ball, the
+        // tile's square in cross-section, drawn into the pattern the ball projects (`gobo`) on the GPU - every tile,
+        // an instance each (`instances`), turned, its light reflected and its square seen from the ball through a
+        // frustum round the wave (GOBO_VS) - and the wave's surface, drawn again, is lit by it per pixel: where a beam
+        // meets it, its square lies on the wave as the wave's own shape takes it. Here, on the CPU, only a sample of the
+        // tiles as large whatever their size (`spot_sample`): of those, one beam in BEAM_EVERY is followed until it meets
+        // the wave (`Sheet`) and drawn through the haze down to it, one in MISS_EVERY that misses it as a long one out
+        // into the air; and they land, small, on a plane at the wave's middle depth, to be seen only on maru-chan and in
+        // the air's share of it (`discoSpotsAir`).
+        if self.palette_seen != f.palette {
+            self.palette_seen = f.palette.to_vec();
+            self.instances_version += 1;
+            Self::tint_instances(&self.spot_table.1, &mut self.instances, &palette);
+        }
+        self.gobo_lights.clear();
         if beams > 0.0 || spots > 0.0 {
-            let wall = 0.6 * h;
-            Self::tiles(|id, place, tilted| {
-                let (p, n) = (turn(place), turn(tilted));
+            self.sheet.read(wave, aspect);
+            let sheet = &self.sheet;
+            let rw = radius * 2.0 * TAN_HALF_FOV * depth / h;
+            let projector = (spots > 0.0).then(|| sheet.projector(at)).flatten();
+            let air_seen = s.disco_spots_air > 0.0 || f.maru.is_some();
+            let project = |p: [f32; 3]| -> Option<[f32; 2]> {
+                let wz = EYE_Z - p[2];
+                (wz > 0.05).then(|| [(p[0] / (TAN_HALF_FOV * aspect * wz) + 1.0) * 0.5 * w, (p[1] / (TAN_HALF_FOV * wz) + 1.0) * 0.5 * h])
+            };
+            let on_screen = |p: [f32; 2], margin: f32| p[0] > -margin && p[0] < w + margin && p[1] > -margin && p[1] < h + margin;
+            let behind = projector.map_or(0.0, |p| p.depth);
+            let table = &self.spot_table.1;
+            for &i in &self.spot_sample {
+                let (id, place, tilted, ..) = table[i];
+                let n = turn(tilted);
                 for (k, (l, colour)) in lights.iter().enumerate() {
                     let lit = dot(n, *l);
                     if lit < 0.05 {
                         continue;
                     }
                     let d = [2.0 * lit * n[0] - l[0], 2.0 * lit * n[1] - l[1], 2.0 * lit * n[2] - l[2]];
-                    let tint = gel(palette[(hash(id * 2 + k as u32) % palette.len() as u32) as usize]);
-                    let colour = [0.35 * colour[0] + 0.65 * tint[0], 0.35 * colour[1] + 0.65 * tint[1], 0.35 * colour[2] + 0.65 * tint[2]];
-                    let flat = (d[0] * d[0] + d[1] * d[1]).sqrt();
-                    if beams > 0.0 && hash(id * 7 + k as u32).is_multiple_of(4) && flat > 0.3 {
-                        let from = [centre[0] + p[0] * radius, centre[1] + p[1] * radius];
-                        let dir = [d[0] / flat, d[1] / flat];
-                        let strength = 0.07 * beams * lit.min(1.0) * pulse * fade;
-                        beam(&mut out, from, dir, h * 0.95 * flat, tile_px * 0.35, tile_px * 0.35 + h * 0.05 * flat, 2.2, colour, strength);
+                    let pick = hash(id * 7 + k as u32);
+                    let (to_spot, to_air) = (pick.is_multiple_of(BEAM_EVERY), pick.is_multiple_of(MISS_EVERY));
+                    let beamed = beams > 0.0 && (to_spot || to_air);
+                    let aired = spots > 0.0 && air_seen && d[2] < -0.05;
+                    if !beamed && !aired {
+                        continue;
                     }
-                    if spots > 0.0 && d[2] < -0.08 {
-                        let at = [centre[0] + d[0] / -d[2] * wall, centre[1] + d[1] / -d[2] * wall];
-                        if at[0] < -40.0 || at[0] > w + 40.0 || at[1] < -40.0 || at[1] > h + 40.0 {
+                    let tint = gel(palette[tint_pick(id, k, palette.len())]);
+                    let colour = [0, 1, 2].map(|i| (1.0 - gel_share) * colour[i] + gel_share * tint[i]);
+                    let strength = spots * lit.min(1.0) * pulse;
+                    let p = turn(place);
+                    let from = along(at, p, rw);
+                    let on_ball = [centre[0] + p[0] * radius, centre[1] + p[1] * radius];
+                    if beamed {
+                        match sheet.hit(from, d) {
+                            Some((t, _)) if to_spot => {
+                                if let Some(seen) = project(along(from, d, t)).filter(|s| on_screen(*s, 40.0)) {
+                                    let (dx, dy) = (seen[0] - on_ball[0], seen[1] - on_ball[1]);
+                                    let length = dx.hypot(dy);
+                                    if length > 4.0 {
+                                        let wide = (spread * t / (TAN_HALF_FOV * (EYE_Z - along(from, d, t)[2]).max(0.1)) * 0.5 * h).max(1.5);
+                                        let strength = 0.045 * beams * lit.min(1.0) * pulse * fade;
+                                        beam(&mut out, on_ball, [dx / length, dy / length], length, tile_px * 0.3, wide, 0.3, colour, strength);
+                                    }
+                                }
+                            }
+                            None if to_air => {
+                                let flat = (d[0] * d[0] + d[1] * d[1]).sqrt();
+                                if flat > 0.3 {
+                                    let strength = 0.07 * beams * lit.min(1.0) * pulse * fade;
+                                    beam(&mut out, on_ball, [d[0] / flat, d[1] / flat], h * 0.95 * flat, tile_px * 0.35, tile_px * 0.35 + h * 0.05 * flat, 2.2, colour, strength);
+                                }
+                            }
+                            _ => {}
+                        }
+                    }
+                    if aired && from[2] > behind {
+                        let t = (behind - from[2]) / d[2];
+                        let Some(seen) = project(along(from, d, t)) else { continue };
+                        if !on_screen(seen, 20.0) {
                             continue;
                         }
-                        let size = (radius * 0.055 / (-d[2]).sqrt()).clamp(2.5, radius * 0.18);
-                        sprite(&mut out, at, size, 0.0, colour, 0.6 * spots * lit.min(1.0) * pulse * fade);
+                        let size = (radius * 0.03).max(1.5);
+                        sprite(&mut out, seen, size, 4.0, colour, 0.9 * strength * fade);
                     }
                 }
-            });
+            }
+            // What the GPU needs to draw the pattern: each light that sends one, with its colour; the ball's turn, the
+            // spots' spread and strength, and the studio's gels' share of their colour.
+            if projector.is_some() {
+                for (l, colour) in lights {
+                    self.gobo_lights.push((*l, *colour));
+                }
+                self.gobo_turn = columns;
+                self.gobo_look = [spread, spots * pulse, gel_share];
+            }
+            self.projector = projector;
         }
         self.under = out.len() / FLOATS;
+        // The spots' receivers: the air's share, and maru-chan's box, in pixels.
+        self.air = s.disco_spots_air.clamp(0.0, 1.0) as f32;
+        self.maru = f.maru.map_or([0.0; 4], |b| {
+            let (x0, y0, x1, y1) = ((b[0] + 1.0) * 0.5 * w, (b[1] + 1.0) * 0.5 * h, (b[2] + 1.0) * 0.5 * w, (b[3] + 1.0) * 0.5 * h);
+            [(x0 + x1) * 0.5, (y0 + y1) * 0.5, ((x1 - x0) * 0.5).max(1.0), ((y1 - y0) * 0.5).max(1.0)]
+        });
         // The glints: each tile turned to send a light to the eye, the brightest seven, twinkling.
+        // Each light's glints are its own share of discoGlare: the key's (or, alone, the sun's or the particles' light's),
+        // the coloured light's, and the sun's beside the studio's.
         let glare = s.disco_glare.max(0.0) as f32;
-        let mut glints: Vec<([f32; 2], f32, [f32; 3])> = Vec::new();
-        Self::tiles(|id, place, tilted| {
+        let key_glare = if mode == 1 { s.disco_glare_sun } else { s.disco_glare_key };
+        let glares = [key_glare, s.disco_glare_colour, s.disco_glare_sun].map(|g| g.max(0.0) as f32);
+        let mut glints: Vec<([f32; 2], f32, [f32; 3], f32)> = Vec::new();
+        Self::tiles(rows, |id, place, tilted| {
             let (p, n) = (turn(place), turn(tilted));
             if p[2] < 0.15 {
                 return;
             }
             let r = [2.0 * n[2] * n[0], 2.0 * n[2] * n[1], 2.0 * n[2] * n[2] - 1.0];
-            for (l, colour) in &lights {
-                let shine = dot(r, *l).max(0.0).powf(60.0);
+            for (i, (l, colour)) in lights.iter().enumerate() {
+                // A glint needs a shine over 0.12, its cosine over 0.12 to the 60th root: the rest are let go first.
+                let toward = dot(r, *l);
+                if toward < 0.965 || glares[i] <= 0.0 {
+                    continue;
+                }
+                let shine = toward.powf(60.0);
                 if shine > 0.12 {
                     let twinkle = 0.65 + 0.35 * (f.now as f32 * 9.0 + (hash(id) % 628) as f32 * 0.01).sin();
-                    glints.push(([centre[0] + p[0] * radius, centre[1] + p[1] * radius], shine * twinkle, *colour));
+                    glints.push(([centre[0] + p[0] * radius, centre[1] + p[1] * radius], shine * twinkle, *colour, glares[i]));
                 }
             }
         });
-        glints.sort_by(|a, b| b.1.total_cmp(&a.1));
+        glints.sort_by(|a, b| (b.1 * b.3).total_cmp(&(a.1 * a.3)));
         glints.truncate(7);
-        let flash: f32 = glints.iter().map(|g| g.1).sum::<f32>().min(3.0);
+        let flash: f32 = glints.iter().map(|g| g.1 * g.3).sum::<f32>().min(3.0);
         if glare > 0.0 {
             sprite(&mut out, centre, radius * 1.8, 2.0, [0.8, 0.85, 1.0], (0.05 + 0.04 * flash) * glare * pulse * fade);
-            for (at, shine, colour) in glints {
-                sprite(&mut out, at, radius * (0.6 + 0.9 * shine.min(1.0)) * glare.sqrt(), 1.0, colour, (0.35 + shine).min(1.3) * glare * pulse * fade);
+            for (at, shine, colour, own) in glints {
+                let g = glare * own;
+                sprite(&mut out, at, radius * (0.6 + 0.9 * shine.min(1.0)) * g.sqrt(), 1.0, colour, (0.35 + shine).min(1.3) * g * pulse * fade);
             }
         }
         self.out = out;
@@ -606,14 +1262,65 @@ impl Disco {
             ("uL1Colour", l.key_colour.to_vec()),
             ("uL2", l.side.to_vec()),
             ("uL2Colour", l.side_colour.to_vec()),
+            ("uL3", l.sun.to_vec()),
+            ("uL3Colour", l.sun_colour.to_vec()),
             ("uFloor", l.floor.to_vec()),
+            ("uFade", vec![fade]),
+            ("uRows", vec![b.rows]),
+            ("uGlass", b.glass.to_vec()),
+            ("uSheen", vec![b.sheen]),
+            ("uSamples", vec![b.samples]),
+        ]
+    }
+
+    /// The pattern's uniforms under light `k` of `gobo_lights`: the light, the ball's turn, the frustum, the spots'
+    /// look.
+    pub fn gobo_uniforms(&self, k: usize) -> Vec<(&'static str, Vec<f32>)> {
+        let (Some(p), Some((l, colour))) = (self.projector, self.gobo_lights.get(k)) else { return Vec::new() };
+        let [x, y, z] = self.gobo_turn;
+        vec![
+            ("uTurnX", x.to_vec()),
+            ("uTurnY", y.to_vec()),
+            ("uTurnZ", z.to_vec()),
+            ("uLight", l.to_vec()),
+            ("uLightColour", colour.to_vec()),
+            ("uWhich", vec![k as f32]),
+            ("uLook", self.gobo_look.to_vec()),
+            ("uPX", p.axes[0].to_vec()),
+            ("uPY", p.axes[1].to_vec()),
+            ("uPZ", p.axes[2].to_vec()),
+            ("uRange", vec![p.lo[0], p.lo[1], p.hi[0], p.hi[1]]),
+        ]
+    }
+
+    /// The lit wave's uniforms: the projector, the light's gain, the scene's fade, and the eye's move (`wave::dolly_clip`).
+    pub fn lit_uniforms(&self, fade: f32, gain: f32, dolly: [f32; 2]) -> Vec<(&'static str, Vec<f32>)> {
+        let Some(p) = self.projector else { return Vec::new() };
+        vec![
+            ("uBall", p.ball.to_vec()),
+            ("uPX", p.axes[0].to_vec()),
+            ("uPY", p.axes[1].to_vec()),
+            ("uPZ", p.axes[2].to_vec()),
+            ("uRange", vec![p.lo[0], p.lo[1], p.hi[0], p.hi[1]]),
+            ("uClip", vec![1.0 / TAN_HALF_FOV, EYE_Z, self.aspect]),
+            ("uDolly", dolly.to_vec()),
+            ("uGain", vec![gain]),
+            ("uReach", vec![p.reach]),
             ("uFade", vec![fade]),
         ]
     }
 
-    /// The sprites' uniforms for a frame `height` pixels tall.
-    pub fn sprite_uniforms(&self, fade: f32, height: f32) -> Vec<(&'static str, Vec<f32>)> {
-        vec![("uFade", vec![fade]), ("uTime", vec![self.lights.time]), ("uFogScale", vec![(height * 0.09).max(8.0)])]
+    /// The sprites' uniforms for a frame `width` x `height` pixels, but the wave's buffer's (`uWave`, `uWaveScale` - one
+    /// over its sub-frames - and `uWaveUv`, the share of it the scene is drawn into), which each renderer sets.
+    pub fn sprite_uniforms(&self, fade: f32, width: f32, height: f32) -> Vec<(&'static str, Vec<f32>)> {
+        vec![
+            ("uFade", vec![fade]),
+            ("uTime", vec![self.lights.time]),
+            ("uFogScale", vec![(height * 0.09).max(8.0)]),
+            ("uScreen", vec![width, height]),
+            ("uAir", vec![self.air]),
+            ("uMaru", self.maru.to_vec()),
+        ]
     }
 }
 
@@ -621,11 +1328,26 @@ impl Disco {
 pub struct DiscoGl {
     ball: Program,
     sprites: Program,
+    lit: Program,
     vao: glow::VertexArray,
     vbo: glow::Buffer,
     quad: glow::VertexArray,
     scene: Option<Target>,
+    gobo: Option<Target>,
+    /// The pattern's program, its quad's corners and its instances, the tiles, with the version they hold.
+    gobo_program: Program,
+    gobo_vao: glow::VertexArray,
+    gobo_instances: glow::Buffer,
+    gobo_version: u64,
 }
+
+/// A quad's corners, -1 to 1, as a strip draws them.
+pub const STRIP: [f32; 8] = [-1.0, -1.0, 1.0, -1.0, -1.0, 1.0, 1.0, 1.0];
+
+/// The pattern the ball projects, GOBO texels square: a square spot some ten texels across.
+pub const GOBO: i32 = 1024;
+/// The lit wave's light, against the pattern's.
+pub const LIT_GAIN: f32 = 1.6;
 
 /// Sets a program's uniforms, each by how many floats it has.
 fn set(gl: &Gl, p: &Program, uniforms: &[(&'static str, Vec<f32>)]) {
@@ -649,9 +1371,29 @@ impl DiscoGl {
             crate::gl_util::FULLSCREEN_VS,
             BALL_FS,
             &["aPos"],
-            &["uScene", "uBox", "uCentre", "uRadius", "uAnchor", "uSpin", "uTilt", "uL1", "uL1Colour", "uL2", "uL2Colour", "uFloor", "uFade"],
+            &["uScene", "uBox", "uCentre", "uRadius", "uAnchor", "uSpin", "uTilt", "uL1", "uL1Colour", "uL2", "uL2Colour", "uL3", "uL3Colour", "uFloor", "uFade", "uRows", "uGlass", "uSheen", "uSamples"],
         );
-        let sprites = Program::new(gl, SPRITE_VS, SPRITE_FS, &["aPos", "aCorner", "aScreen", "aColor"], &["uFade", "uTime", "uFogScale"]);
+        let sprites = Program::new(
+            gl,
+            SPRITE_VS,
+            SPRITE_FS,
+            &["aPos", "aCorner", "aScreen", "aColor"],
+            &["uFade", "uTime", "uFogScale", "uWave", "uWaveScale", "uWaveUv", "uScreen", "uAir", "uMaru"],
+        );
+        let gobo_program = Program::new(
+            gl,
+            GOBO_VS,
+            GOBO_FS,
+            &["aCorner", "aTile", "aMore"],
+            &["uTurnX", "uTurnY", "uTurnZ", "uLight", "uLightColour", "uWhich", "uLook", "uPX", "uPY", "uPZ", "uRange"],
+        );
+        let lit = Program::new(
+            gl,
+            LIT_VS,
+            LIT_FS,
+            &["aPos", "aNormal", "aUv"],
+            &["uGobo", "uBall", "uPX", "uPY", "uPZ", "uRange", "uClip", "uDolly", "uGain", "uReach", "uFade"],
+        );
         unsafe {
             let vao = gl.create_vertex_array().expect("vertex array");
             let vbo = gl.create_buffer().expect("buffer");
@@ -663,12 +1405,44 @@ impl DiscoGl {
             }
             gl.bind_vertex_array(None);
             gl.bind_buffer(glow::ARRAY_BUFFER, None);
-            DiscoGl { ball, sprites, vao, vbo, quad: crate::gl_util::quad(gl), scene: None }
+            let gobo_vao = gl.create_vertex_array().expect("vertex array");
+            gl.bind_vertex_array(Some(gobo_vao));
+            let corners = gl.create_buffer().expect("buffer");
+            gl.bind_buffer(glow::ARRAY_BUFFER, Some(corners));
+            gl.buffer_data_u8_slice(glow::ARRAY_BUFFER, crate::gl_util::as_bytes(&STRIP), glow::STATIC_DRAW);
+            gl.enable_vertex_attrib_array(0);
+            gl.vertex_attrib_pointer_f32(0, 2, glow::FLOAT, false, 8, 0);
+            let gobo_instances = gl.create_buffer().expect("buffer");
+            gl.bind_buffer(glow::ARRAY_BUFFER, Some(gobo_instances));
+            for i in 1..3 {
+                gl.enable_vertex_attrib_array(i);
+                gl.vertex_attrib_pointer_f32(i, 4, glow::FLOAT, false, 32, ((i - 1) * 16) as i32);
+                gl.vertex_attrib_divisor(i, 1);
+            }
+            gl.bind_vertex_array(None);
+            gl.bind_buffer(glow::ARRAY_BUFFER, None);
+            DiscoGl {
+                ball,
+                sprites,
+                lit,
+                vao,
+                vbo,
+                quad: crate::gl_util::quad(gl),
+                scene: None,
+                gobo: None,
+                gobo_program,
+                gobo_vao,
+                gobo_instances,
+                gobo_version: 0,
+            }
         }
     }
 
-    /// Draws the ball and its light over the window's framebuffer, `width` x `height`, at the scene's `fade`.
-    pub fn draw(&mut self, gl: &Gl, disco: &Disco, width: i32, height: i32, fade: f32) {
+    /// Draws the ball and its light over the window's framebuffer, `width` x `height`, at the scene's `fade`; `wave` is
+    /// the wave's light buffer, its scale (one over its sub-frames) and the share of it the scene is drawn into, and
+    /// `mesh` the wave's mesh as `spline.rs` draws it (its vertex array and index count), which the ball's light lights.
+    #[allow(clippy::too_many_arguments)]
+    pub fn draw(&mut self, gl: &Gl, disco: &Disco, width: i32, height: i32, fade: f32, wave: (glow::Texture, f32, f32), mesh: (glow::VertexArray, i32)) {
         let Some(ball) = disco.ball else { return };
         if width <= 0 || height <= 0 {
             return;
@@ -694,10 +1468,48 @@ impl DiscoGl {
             gl.blend_func(glow::ONE, glow::ONE_MINUS_SRC_ALPHA);
             gl.viewport(0, 0, width, height);
             gl.use_program(Some(self.sprites.prog));
-            set(gl, &self.sprites, &disco.sprite_uniforms(fade, height as f32));
+            set(gl, &self.sprites, &disco.sprite_uniforms(fade, width as f32, height as f32));
+            gl.active_texture(glow::TEXTURE1);
+            gl.bind_texture(glow::TEXTURE_2D, Some(wave.0));
+            gl.uniform_1_i32(self.sprites.u("uWave"), 1);
+            gl.uniform_1_f32(self.sprites.u("uWaveScale"), wave.1);
+            gl.uniform_1_f32(self.sprites.u("uWaveUv"), wave.2);
+            gl.active_texture(glow::TEXTURE0);
             gl.bind_vertex_array(Some(self.vao));
             gl.bind_buffer(glow::ARRAY_BUFFER, Some(self.vbo));
             gl.buffer_data_u8_slice(glow::ARRAY_BUFFER, crate::gl_util::as_bytes(&disco.out), glow::STREAM_DRAW);
+            // The pattern the ball projects, a light at a time over every tile, then the wave lit by it.
+            if disco.projector.is_some() && !disco.gobo_lights.is_empty() && !disco.instances.is_empty() {
+                if self.gobo_version != disco.instances_version {
+                    self.gobo_version = disco.instances_version;
+                    gl.bind_buffer(glow::ARRAY_BUFFER, Some(self.gobo_instances));
+                    gl.buffer_data_u8_slice(glow::ARRAY_BUFFER, crate::gl_util::as_bytes(&disco.instances), glow::STATIC_DRAW);
+                }
+                let gobo = self.gobo.get_or_insert_with(|| Target::new(gl, GOBO, GOBO, true, glow::LINEAR));
+                gl.bind_framebuffer(glow::FRAMEBUFFER, Some(gobo.fbo));
+                gl.viewport(0, 0, GOBO, GOBO);
+                gl.clear_color(0.0, 0.0, 0.0, 0.0);
+                gl.clear(glow::COLOR_BUFFER_BIT);
+                gl.use_program(Some(self.gobo_program.prog));
+                gl.bind_vertex_array(Some(self.gobo_vao));
+                for k in 0..disco.gobo_lights.len() {
+                    set(gl, &self.gobo_program, &disco.gobo_uniforms(k));
+                    gl.draw_arrays_instanced(glow::TRIANGLE_STRIP, 0, 4, disco.instances.len() as i32);
+                }
+                gl.bind_framebuffer(glow::FRAMEBUFFER, None);
+                gl.viewport(0, 0, width, height);
+                let p = &self.lit;
+                gl.use_program(Some(p.prog));
+                let dolly = crate::wave::subframes().last().map_or(0.0, |s| s.0);
+                set(gl, p, &disco.lit_uniforms(fade, LIT_GAIN, crate::wave::dolly_clip(dolly)));
+                gl.active_texture(glow::TEXTURE0);
+                gl.bind_texture(glow::TEXTURE_2D, Some(gobo.tex));
+                gl.uniform_1_i32(p.u("uGobo"), 0);
+                gl.bind_vertex_array(Some(mesh.0));
+                gl.draw_elements(glow::TRIANGLE_STRIP, mesh.1, glow::UNSIGNED_SHORT, 0);
+                gl.use_program(Some(self.sprites.prog));
+                gl.bind_vertex_array(Some(self.vao));
+            }
             // The beams and the spots, then the ball over them, then its glints and glow.
             if under > 0 {
                 gl.draw_arrays(glow::TRIANGLES, 0, under);

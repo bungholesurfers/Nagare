@@ -214,6 +214,16 @@ pub struct VkGfx {
     disco_sprites: Program,
     disco_vertices: Option<wgpu::Buffer>,
     disco_scene: Option<Tex>,
+    /// The wave lit by the ball, and the pattern the ball projects: its target, its program, its quad's corners and its
+    /// instances, the tiles, with the version they hold.
+    disco_lit: Program,
+    disco_gobo: Option<Tex>,
+    disco_gobo_program: Program,
+    disco_corners: wgpu::Buffer,
+    disco_instances: Option<wgpu::Buffer>,
+    disco_instances_version: u64,
+    /// Whether the GPU built the wave last drawn.
+    wave_built: bool,
     fxaa: Program,
     /// FXAA's result, which the sharpening or the copy onto the screen then reads.
     smoothed: Option<Tex>,
@@ -407,13 +417,14 @@ impl VkGfx {
             gpu.program(programs::fxaa(), Vertex::Quad),
             gpu.program(programs::maru_down(), Vertex::Quad),
             gpu.program(programs::maru_probe(), Vertex::Quad),
-            (gpu.program(programs::disco_ball(), Vertex::Quad), gpu.program(programs::disco_sprites(), Vertex::Maru)),
+            (gpu.program(programs::disco_ball(), Vertex::Quad), gpu.program(programs::disco_sprites(), Vertex::Maru), gpu.program(programs::disco_lit(), Vertex::Wave), gpu.program(programs::disco_gobo(), Vertex::Particles)),
             timed.then(|| Timer::new(&gpu)),
         );
         if let Some(e) = unscope(scoped) {
             return Err(e);
         }
-        let (egui, overlay, scene, particles, blur, present, sharpen, maru, fxaa, maru_down, maru_probe, (disco_ball, disco_sprites), timer) = made;
+        let (egui, overlay, scene, particles, blur, present, sharpen, maru, fxaa, maru_down, maru_probe, (disco_ball, disco_sprites, disco_lit, disco_gobo_program), timer) = made;
+        let disco_corners = gpu.buffer("disco corners", gpu::as_bytes(&crate::disco::STRIP), wgpu::BufferUsages::VERTEX);
         // spline.elf on the GPU, apart: where it cannot run, the CPU builds the wave, as under OpenGL.
         let scoped = scope(&gpu);
         let wave = wave_gpu::WaveGpu::new(&gpu, double);
@@ -441,6 +452,13 @@ impl VkGfx {
             disco_sprites,
             disco_vertices: None,
             disco_scene: None,
+            disco_lit,
+            disco_gobo: None,
+            disco_gobo_program,
+            disco_corners,
+            disco_instances: None,
+            disco_instances_version: 0,
+            wave_built: false,
             fxaa,
             smoothed: None,
             supersample: 1.0,
@@ -563,6 +581,7 @@ impl VkGfx {
                 t.switch(e, pass);
             }
         };
+        self.wave_built = gpu_wave && self.wave.is_some();
         let built = match (&mut self.wave, gpu_wave) {
             (Some(w), true) => {
                 mark(encoder, Pass::Spline);
@@ -753,8 +772,8 @@ impl VkGfx {
             }
             self.disco_scene = Some(self.gpu.target(w, h, false, Sampling::LINEAR));
         }
-        let (Some(encoder), Some(canvas), Some(buffer), Some(scene)) =
-            (self.encoder.as_mut(), self.canvas.as_ref(), self.disco_vertices.as_ref(), self.disco_scene.as_ref())
+        let (Some(encoder), Some(canvas), Some(buffer), Some(scene), Some((wave, wave_scale))) =
+            (self.encoder.as_mut(), self.canvas.as_ref(), self.disco_vertices.as_ref(), self.disco_scene.as_ref(), self.scene.wave_light())
         else {
             return;
         };
@@ -768,11 +787,60 @@ impl VkGfx {
         }
         let corners = (vertices.len() / crate::maru::FLOATS) as u32;
         let spots = disco.under as u32;
+        // The pattern the ball projects, a light at a time over every tile, then the wave lit by it.
+        if disco.projector.is_some() && !disco.gobo_lights.is_empty() && !disco.instances.is_empty() {
+            let bytes = std::mem::size_of_val(&disco.instances[..]) as u64;
+            if self.disco_instances.as_ref().is_none_or(|b| b.size() < bytes) {
+                self.disco_instances = Some(self.gpu.device.create_buffer(&wgpu::BufferDescriptor {
+                    label: Some("disco instances"),
+                    size: bytes.next_power_of_two(),
+                    usage: wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST,
+                    mapped_at_creation: false,
+                }));
+                self.disco_instances_version = 0;
+            }
+            let instances = self.disco_instances.as_ref().unwrap();
+            if self.disco_instances_version != disco.instances_version {
+                self.disco_instances_version = disco.instances_version;
+                self.gpu.queue.write_buffer(instances, 0, gpu::as_bytes(&disco.instances));
+            }
+            let size = crate::disco::GOBO as u32;
+            let gobo = &*self.disco_gobo.get_or_insert_with(|| self.gpu.target(size, size, true, Sampling::LINEAR));
+            for k in 0..disco.gobo_lights.len() {
+                let mut bake = self.disco_gobo_program.params();
+                for (name, v) in disco.gobo_uniforms(k) {
+                    bake.f(name, &v);
+                }
+                let draw = Draw {
+                    clear: (k == 0).then_some([0.0; 4]),
+                    blend: gpu::Blend::Add,
+                    geometry: gpu::Geometry::Instanced { vertices: [&self.disco_corners, instances], instances: disco.instances.len() as u32 },
+                    ..Draw::quad(gobo.target(), &[])
+                };
+                self.gpu.draw(encoder, &self.disco_gobo_program, &bake, &draw);
+            }
+            let mut lit = self.disco_lit.params();
+            let dolly = crate::wave::subframes().last().map_or(0.0, |s| s.0);
+            for (name, v) in disco.lit_uniforms(fade, crate::disco::LIT_GAIN, crate::wave::dolly_clip(dolly)) {
+                lit.f(name, &v);
+            }
+            let built = self.wave.as_ref().filter(|_| self.wave_built).map(|g| &g.mesh);
+            let textures = [("uGobo", gobo)];
+            let draw = Draw {
+                blend: gpu::Blend::Premultiplied,
+                geometry: self.scene.wave_geometry(built),
+                ..Draw::quad(canvas.target(), &textures)
+            };
+            self.gpu.draw(encoder, &self.disco_lit, &lit, &draw);
+        }
         let mut sprites = self.disco_sprites.params();
-        for (name, v) in disco.sprite_uniforms(fade, h as f32) {
+        for (name, v) in disco.sprite_uniforms(fade, w as f32, h as f32) {
             sprites.f(name, &v);
         }
-        let none: [(&str, &Tex); 0] = [];
+        // The wave's light under each spot; the scene fills the canvas, supersampled or not.
+        sprites.f("uWaveScale", &[wave_scale]);
+        sprites.f("uWaveUv", &[1.0]);
+        let none = [("uWave", wave)];
         if spots > 0 {
             let draw = Draw {
                 blend: gpu::Blend::Premultiplied,
