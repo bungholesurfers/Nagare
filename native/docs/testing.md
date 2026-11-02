@@ -131,15 +131,36 @@ geometry** as the CPU. `cargo xtask wavediff` closes that gap — it dumps the w
 position then normal per vertex) built each way and reports how far apart they are.
 
 ```
-cargo xtask wavediff            # runs Nagare twice under Vulkan (gpuWave=0, then =1) and diffs the two dumps
-cargo xtask wavediff A B        # diffs two dumps already taken with --dump-wave
+cargo xtask wavediff                     # runs Nagare twice under Vulkan (gpuWave=0, then =1) and diffs the two dumps
+cargo xtask wavediff --particles         # the same for the particle pool (gpuParticles=0, then =1)
+cargo xtask wavediff [--particles] A B   # diffs two dumps already taken with --dump-wave / --dump-particles
 ```
 
 Under the hood, `--dump-wave SEC=FILE` writes the mesh at a fixed frame: the CPU program's, or - when `gpuWave` built
 it - the GPU's, read back from the compute buffer. Same `--test` clock and seed, so the only difference is the build
 path. It prints the bit-identical count, the mean and max absolute difference, and the worst float. For the wave this
-is essentially nil: the GPU runs the console's program in f64 where it can, matching the CPU to about one ULP. The
-particle sim will reuse this `--dump-*` + diff pattern once its GPU path lands.
+is essentially nil: the GPU runs the console's program in f64 where it can, matching the CPU to about one ULP.
+
+`--dump-particles SEC=FILE` does the same for the pool (2049 slots of 12 floats: position and life, velocity and
+aging rate, orientation), read whole from the GPU when `gpuParticles` ran it. Expect position, velocity and life
+**bit-exact** and the quaternion within ~1e-6 - its trig runs in f32 on the GPU, since GLSL.std.450 has no f64
+`sin`/`cos`. Any difference on `life` is a real bug: the two paths disagree about which slots are alive.
+
+**The XMB start on the GPU path.** A start on frame 1 proves nothing about the reset: no readback is in flight yet.
+The case that matters is a start begun *mid-run*, when the readback from the dispatch before it still describes the
+pool the start throws away - folded in, it raised phantoms (slots alive at the origin, and still on the free list),
+seen as a small glimmering square in front of the camera a few seconds in. `--set-at SEC:sequence=N` starts a sequence
+by its place in the Sequence dropdown (1 the XMB's start); `startTransition=1` keeps the frame-1 start off so the GPU
+is running steady first:
+
+```
+nagare --test --renderer vulkan --set startTransition=1 --set-at 2:sequence=1 --set gpuParticles=0 --dump-particles 3=cpu.bin --exit-after 3.2
+nagare --test --renderer vulkan --set startTransition=1 --set-at 2:sequence=1 --set gpuParticles=1 --dump-particles 3=gpu.bin --exit-after 3.2
+cargo xtask wavediff --particles cpu.bin gpu.bin
+```
+
+Expect the usual ~3e-7 on the quaternion alone. The phantom bug read as a max of ~666 on `life` (`-666`, FREE on the
+CPU, against a live value on the GPU); the fix drops a readback older than the pool unread (`GpuTask::discard`).
 
 ---
 

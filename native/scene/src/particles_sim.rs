@@ -426,6 +426,9 @@ pub trait GpuTask {
     /// readback - enough for the free list and the ranks. No-op on the first step; waits only when a same-frame step
     /// hasn't left the GPU a gap.
     fn sync_pool(&mut self, pool: &mut [f32]);
+    /// Drops a pending readback unread: the pool it was taken from no longer exists (rebuilt, resized, or moved by the
+    /// CPU since), so the simulation's own pool is authoritative and the next `run` uploads all of it.
+    fn discard(&mut self);
     /// Reads the whole GPU-resident pool into `pool` (position, velocity, quaternion and all). For `--dump-particles`
     /// only; it waits on the GPU.
     fn read_full(&mut self, pool: &mut [f32]);
@@ -1292,9 +1295,16 @@ impl System {
         self.move_icons(&s, opts, ev.step);
         self.pointer_wind(&s, ev.pointer);
         if let Some(g) = gpu.as_deref_mut() {
-            // GPU path: fold in the previous dispatch's result and reclaim its deaths before emitting into free slots.
-            g.sync_pool(&mut self.pool);
-            self.gpu_reclaim();
+            if self.gpu_ranks.is_empty() {
+                // No dispatch to trust: the pool was rebuilt (the XMB's start), resized, or the CPU ran it since. A
+                // readback still in flight describes a pool that is gone - folding it in would raise slots alive at
+                // the origin, in front of the camera, and leave them on the free list too - so it is dropped unread.
+                g.discard();
+            } else {
+                // GPU path: fold in the previous dispatch's result and reclaim its deaths before emitting into free slots.
+                g.sync_pool(&mut self.pool);
+                self.gpu_reclaim();
+            }
         }
         self.emit(&s, mesh);
         self.run_task(gpu);

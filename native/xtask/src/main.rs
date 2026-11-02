@@ -36,6 +36,16 @@ cargo xtask <task>, from native/:
                        compare what the CPU vs the GPU builds, as raw data: the wave mesh (gpuWave), or with
                        --particles the particle pool (gpuParticles). No files: runs both under Vulkan and reports
                        the difference; two dump files (from --dump-wave / --dump-particles): diffs those
+  perf DIR [--exe EXE] [--seconds S] [--no-lock] [-- ARGS...]
+                       each stage's CPU and each pass's GPU cost under locked GPU clocks: Vulkan and OpenGL, each
+                       as a --test run (vsync off: the frame's pure work) and a --window run (real pacing), 15 s
+                       each at 1920x1080, the reports into DIR and each run's table printed. Locks the GPU's clocks
+                       at their maximum first (sudo nvidia-smi --lock-gpu-clocks: left to the driver, a scene this
+                       light runs at half the clock and jitters) and puts them back after, whatever happens;
+                       --no-lock measures as the driver clocks. The runs take a copy of the config, the panel
+                       hidden, never the user's own (a run autosaves what --set gives it). Quit Nagare first: the
+                       runs would share the GPU with it. ARGS go to every run
+  perf --reset         put the GPU's clocks back, after a perf cut short
   ready                everything before a commit: check, pgo, installer --no-build --install
   help                 this
 ";
@@ -99,6 +109,7 @@ fn main() {
             _ => Err("usage: cargo xtask compare DIR1 DIR2".into()),
         },
         Some("wavediff") => wavediff(&rest),
+        Some("perf") => perf(&rest),
         Some("ready") => ready(),
         Some("help" | "--help" | "-h") | None => {
             print!("{USAGE}");
@@ -465,6 +476,216 @@ fn diff_dumps(a: &Path, b: &Path, record: usize, labels: &[&str]) -> Result {
     println!("  exact (bit-identical): {exact}/{n} ({:.2}%)", 100.0 * exact as f64 / n as f64);
     println!("  mean abs diff: {:.3e}", sum / n as f64);
     println!("  max  abs diff: {max:.3e}  at record {} {component}  ({} vs {})", worst / record, x[worst], y[worst]);
+    Ok(())
+}
+
+/// The perf runs: each renderer as a --test run (vsync off, so the frame's pure work, the frames as fast as they come)
+/// and as a --window run (real pacing: vsync at the display's refresh, the 60 fps cap). The scene sampled is the steady
+/// one - the start transition the short fade, the epilepsy warning left out - so that what is measured is the scene,
+/// not a card drawn over it.
+const PERF_RUNS: &[(&str, &[&str])] = &[
+    ("vk-test", &["--renderer", "vulkan", "--test"]),
+    ("vk-window", &["--renderer", "vulkan", "--window"]),
+    ("gl-test", &["--renderer", "opengl", "--test"]),
+    ("gl-window", &["--renderer", "opengl", "--window"]),
+];
+
+/// nvidia-smi, if the system has it: on PATH, or where the driver puts it on Windows.
+fn nvidia_smi() -> Option<PathBuf> {
+    let mut candidates = vec![PathBuf::from("nvidia-smi")];
+    if cfg!(windows) {
+        if let Some(root) = std::env::var_os("SystemRoot") {
+            candidates.push(Path::new(&root).join("System32").join("nvidia-smi.exe"));
+        }
+        if let Some(pf) = std::env::var_os("ProgramFiles") {
+            candidates.push(Path::new(&pf).join("NVIDIA Corporation").join("NVSMI").join("nvidia-smi.exe"));
+        }
+    }
+    candidates.into_iter().find(|c| Command::new(c).arg("-L").output().is_ok_and(|o| o.status.success()))
+}
+
+/// One field of the first GPU's, as nvidia-smi reports it, without its unit.
+fn smi_query(smi: &Path, field: &str) -> Option<String> {
+    let o = Command::new(smi).args([&format!("--query-gpu={field}"), "--format=csv,noheader,nounits"]).output().ok()?;
+    o.status.success().then(|| String::from_utf8_lossy(&o.stdout).lines().next().unwrap_or("").trim().to_string())
+}
+
+/// nvidia-smi as administrator - through sudo, Windows' own (in inline mode) or Unix's - which the clocks need.
+fn smi_elevated(smi: &Path) -> Command {
+    let mut c = Command::new("sudo");
+    c.arg(smi);
+    c
+}
+
+/// Puts the GPU's clocks back to the driver's own.
+fn reset_clocks(smi: &Path) {
+    match smi_elevated(smi).arg("-rgc").output() {
+        Ok(o) if o.status.success() => {
+            let now = smi_query(smi, "clocks.sm").map_or(String::from("?"), |c| format!("{c} MHz now"));
+            println!("GPU clocks reset ({now})");
+        }
+        Ok(o) => eprintln!("perf: nvidia-smi -rgc: {}", String::from_utf8_lossy(&o.stderr).trim()),
+        Err(e) => eprintln!("perf: nvidia-smi -rgc: {e}"),
+    }
+}
+
+/// Which nvidia-smi locked the clocks, for the Ctrl-C handler, which can be handed nothing else.
+#[cfg(windows)]
+static LOCKED_SMI: std::sync::OnceLock<PathBuf> = std::sync::OnceLock::new();
+
+#[cfg(windows)]
+unsafe extern "system" {
+    fn SetConsoleCtrlHandler(handler: Option<unsafe extern "system" fn(u32) -> i32>, add: i32) -> i32;
+}
+
+/// Ctrl-C ends the process without dropping anything, so the clocks are put back here first.
+#[cfg(windows)]
+unsafe extern "system" fn on_ctrl(_: u32) -> i32 {
+    if let Some(smi) = LOCKED_SMI.get() {
+        reset_clocks(smi);
+    }
+    std::process::exit(130)
+}
+
+/// The GPU's clocks locked at their maximum, and put back when this drops - the runs done, an error, a panic - or on
+/// Ctrl-C. Without it a scene as light as Nagare's leaves the GPU at a low power state, every pass taking about three
+/// times as long and jittering with the clock, so runs would not compare.
+struct ClockLock(PathBuf);
+
+impl ClockLock {
+    fn take(smi: &Path) -> Result<(Self, u32)> {
+        let max: u32 = smi_query(smi, "clocks.max.sm").and_then(|s| s.parse().ok()).ok_or("nvidia-smi reports no clocks.max.sm")?;
+        #[cfg(windows)]
+        {
+            let _ = LOCKED_SMI.set(smi.to_path_buf());
+            // SAFETY: a plain Win32 call; the handler only runs a command and exits.
+            unsafe { SetConsoleCtrlHandler(Some(on_ctrl), 1) };
+        }
+        let o = smi_elevated(smi).args(["-lgc", &format!("{max},{max}")]).output().map_err(|e| format!("sudo nvidia-smi: {e}"))?;
+        if !o.status.success() {
+            return Err(format!("nvidia-smi -lgc: {}", String::from_utf8_lossy(&o.stderr).trim()));
+        }
+        println!("{}", String::from_utf8_lossy(&o.stdout).trim());
+        Ok((ClockLock(smi.to_path_buf()), max))
+    }
+}
+
+impl Drop for ClockLock {
+    fn drop(&mut self) {
+        reset_clocks(&self.0);
+    }
+}
+
+/// Whether a Nagare is running: one more hands over to it and exits (single.rs), and would measure nothing. The exe
+/// about to run is asked first - a running one cannot be opened for writing (as `free` relies on) - then the process
+/// list, for a copy running from elsewhere.
+fn nagare_running(exe_path: &Path) -> bool {
+    let locked = exe_path.exists() && std::fs::OpenOptions::new().write(true).open(exe_path).is_err();
+    locked
+        || if cfg!(windows) {
+            Command::new("tasklist").args(["/FI", "IMAGENAME eq nagare.exe", "/NH"]).output().is_ok_and(|o| String::from_utf8_lossy(&o.stdout).contains("nagare.exe"))
+        } else {
+            Command::new("pgrep").args(["-x", "nagare"]).output().is_ok_and(|o| o.status.success())
+        }
+}
+
+/// Where the app keeps its config on this platform (as config.rs has it), to copy for the runs.
+fn config_dir() -> Option<PathBuf> {
+    let env = |k: &str| std::env::var_os(k).filter(|v| !v.is_empty()).map(PathBuf::from);
+    if cfg!(windows) {
+        return env("APPDATA").map(|p| p.join("Nagare"));
+    }
+    let home = env("HOME")?;
+    if cfg!(target_os = "macos") {
+        return Some(home.join("Library").join("Application Support").join("Nagare"));
+    }
+    Some(env("XDG_CONFIG_HOME").filter(|p| p.is_absolute()).unwrap_or_else(|| home.join(".config")).join("nagare"))
+}
+
+/// A config of the runs' own under `out`: the user's copied, with machine.json beside it so that no first-start
+/// benchmark runs, or, with none to copy, a minimal one that has seen it all and asks nothing of the network. A run
+/// that is not a test autosaves what --set gives it, as if set from the panel, so the user's own is never handed one.
+fn scratch_config(out: &Path) -> Result<String> {
+    let dir = out.join("config");
+    std::fs::create_dir_all(&dir).map_err(|e| format!("{}: {e}", dir.display()))?;
+    let path = dir.join("config.json");
+    match config_dir().filter(|d| d.join("config.json").is_file()) {
+        Some(src) => {
+            for name in ["config.json", "machine.json"] {
+                if src.join(name).is_file() {
+                    std::fs::copy(src.join(name), dir.join(name)).map_err(|e| format!("copying {name}: {e}"))?;
+                }
+            }
+            println!("config: a copy of {}, never the user's own", src.join("config.json").display());
+        }
+        None => {
+            let minimal = "{\"version\":1,\"introSeen\":true,\"pokeTipDismissed\":true,\"scrollHintDismissed\":true,\"epilepsyWarningSeen\":true,\"updateConsent\":false,\"fpsAuto\":false,\"fps\":60.0}\n";
+            std::fs::write(&path, minimal).map_err(|e| format!("{}: {e}", path.display()))?;
+            println!("config: none to copy; a minimal one at {} (without a machine.json, the first run benchmarks)", path.display());
+        }
+    }
+    Ok(path.display().to_string())
+}
+
+fn perf(args: &[&str]) -> Result {
+    let (ours, extra) = match args.iter().position(|a| *a == "--") {
+        Some(i) => (&args[..i], &args[i + 1..]),
+        None => (args, &[][..]),
+    };
+    let (mut out, mut seconds, mut lock, mut reset) = (None, 15.0f64, true, false);
+    let mut exe_path = exe(&native().join("target").join("release"), "nagare");
+    let mut it = ours.iter();
+    while let Some(a) = it.next() {
+        match *a {
+            "--exe" => exe_path = PathBuf::from(it.next().ok_or("--exe needs a path")?),
+            "--seconds" => seconds = it.next().and_then(|s| s.parse().ok()).filter(|s: &f64| *s > 0.0).ok_or("--seconds needs a number above 0")?,
+            "--no-lock" => lock = false,
+            "--reset" => reset = true,
+            dir if out.is_none() => out = Some(PathBuf::from(dir)),
+            other => return Err(format!("unexpected {other:?}")),
+        }
+    }
+    if reset {
+        reset_clocks(&nvidia_smi().ok_or("nvidia-smi not found")?);
+        return Ok(());
+    }
+    let out = out.ok_or("usage: cargo xtask perf DIR [--exe EXE] [--seconds S] [--no-lock] [-- ARGS...], or perf --reset")?;
+    if nagare_running(&exe_path) {
+        return Err("a Nagare is running: quit it first; the runs would share the GPU with it".into());
+    }
+    std::fs::create_dir_all(&out).map_err(|e| format!("{}: {e}", out.display()))?;
+    let scratch = scratch_config(&out)?;
+    let guard = match (lock, nvidia_smi()) {
+        (false, _) => None,
+        (true, None) => {
+            eprintln!("perf: nvidia-smi not found; measuring as the driver clocks the GPU");
+            None
+        }
+        (true, Some(smi)) => match ClockLock::take(&smi) {
+            Ok((guard, max)) => {
+                println!("GPU clocks locked at {max} MHz");
+                Some(guard)
+            }
+            Err(e) => {
+                eprintln!("perf: not locking the GPU's clocks ({e}); measuring as the driver clocks them");
+                None
+            }
+        },
+    };
+    let clocks = if guard.is_some() { "clocks locked" } else { "clocks as the driver sets them" };
+    for (name, run_args) in PERF_RUNS {
+        step(&format!("perf: {name} ({clocks})"));
+        let report = out.join(format!("{name}.json")).display().to_string();
+        let mut cmd = Command::new(&exe_path);
+        cmd.args(*run_args)
+            .args(["--config", &scratch, "--no-ui", "--size", "1920x1080", "--warmup", "2"])
+            .args(["--set", "startTransition=1", "--set", "epilepsyWarningEvery=0"])
+            .args(extra)
+            .args(["--exit-after", &format!("{seconds}"), "--report", &report]);
+        run(&mut cmd)?;
+    }
+    drop(guard);
+    println!("\nreports in {}", out.display());
     Ok(())
 }
 

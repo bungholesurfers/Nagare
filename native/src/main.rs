@@ -114,7 +114,8 @@ Testing and profiling:
   --size WxH         the window's size in pixels
   --set KEY=VALUE    sets any numeric setting, by its panel name (glareMode=0, tonemap=2, exposure=1.2)
   --set-at SEC:KEY=VALUE  sets one when the scene's clock reaches SEC seconds, as the panel would (renderer=1
-                     switches to Vulkan mid-run); may be given again
+                     switches to Vulkan mid-run; sequence=N starts a boot sequence, N its place in the Sequence
+                     dropdown, 1 the XMB's start); may be given again
   --shot SEC=FILE    saves the frame drawn when the scene's clock reaches SEC seconds as a PNG (the scene, and the
                      panel if it shows, without the overlay); may be given again for more shots
   --dump-wave SEC=FILE
@@ -2780,6 +2781,16 @@ impl App {
             // The scene's music too, as --set takes it.
             if key == "musicPlaying" {
                 self.scene.music_playing = value != 0.0;
+                continue;
+            }
+            // A boot sequence too, by its place in SEQUENCE_OPTIONS (1 the XMB's start), written as the panel writes
+            // it by name. Starting one mid-run is how the GPU particle path's rebuild is exercised headlessly: the
+            // readback then in flight belongs to the pool the start throws away.
+            if key == "sequence" {
+                match settings::SEQUENCE_OPTIONS.get(value.round().max(0.0) as usize) {
+                    Some(&(name, _)) => self.scene.sequence = name,
+                    None => eprintln!("--set-at: sequence {value} is not one of {} options", settings::SEQUENCE_OPTIONS.len()),
+                }
                 continue;
             }
             let (p, w, n) = (&mut self.particle_settings, &mut self.wave_settings, &mut self.native_settings);

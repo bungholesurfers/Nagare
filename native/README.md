@@ -1052,7 +1052,7 @@ seconds, not the wall's.
 | `--exit-after SEC` | Exits at that scene time.                                                                  |
 | `--report FILE`    | On exit, writes each stage's CPU time and each pass's GPU time (mean, median, 95th and 99th percentiles, worst), the process's CPU time and each thread's, and each frame's interval and stages (`each_frame`, where a spike lands), as JSON, and prints a summary. |
 | `--warmup SEC`     | The scene seconds left out of the report at the start (1).                                 |
-| `--set-at SEC:KEY=VALUE` | Sets one at that scene time, as the panel would (`renderer=1` switches to Vulkan mid-run; `musicPlaying` too). Repeatable. |
+| `--set-at SEC:KEY=VALUE` | Sets one at that scene time, as the panel would (`renderer=1` switches to Vulkan mid-run; `musicPlaying` too; `sequence=N` starts a boot sequence, N its place in the Sequence dropdown, 1 the XMB's start). Repeatable. |
 | `--renderer API`   | Draws with Vulkan, OpenGL or software.                                                     |
 | `--ui`             | Shows the panel in a test.                                                                 |
 
@@ -1114,6 +1114,7 @@ The build tasks are a small Rust program, `xtask/` (standard library only), whic
 | `cargo xtask shots DIR [--exe EXE] [-- ARGS...]` | the regression shots across the renderer/scene matrix (OpenGL, Vulkan and Vulkan supersampled, plus the day, music, Season Pass and disco variants), at 6 s and 25 s |
 | `cargo xtask compare DIR1 DIR2` | two shots folders compared byte for byte |
 | `cargo xtask wavediff [--particles] [A B]` | CPU vs GPU as raw data: the wave mesh (`gpuWave`), or with `--particles` the particle pool (`gpuParticles`); with no files runs both under Vulkan and reports the difference; with two dump files diffs those |
+| `cargo xtask perf DIR [--seconds S] [--no-lock] [-- ARGS...]` | each stage's CPU and each pass's GPU cost: Vulkan and OpenGL, each as a `--test` run (vsync off, the frame's pure work) and a `--window` run (real pacing), 15 s at 1920x1080, the reports into DIR and each table printed. Locks the GPU's clocks at their maximum first (`sudo nvidia-smi --lock-gpu-clocks`) and puts them back after, whatever happens - left to the driver, a scene this light sits at about half the clock, every pass taking ~3x longer and jittering with it, so runs would not compare; `--no-lock` measures as the driver clocks. The runs take a copy of the config (with `machine.json`, so no first-start benchmark runs), the panel hidden - never the user's own, since a run that is not a test autosaves what `--set` gives it. Quit Nagare first: the runs would share the GPU with it. `perf --reset` puts the clocks back after a run cut short |
 | `cargo xtask ready` | everything before a commit: `check`, `pgo`, then `installer --no-build --install` |
 
 A Nagare running from `target\release` would lock its exe against the build; the tasks move such an exe aside (to

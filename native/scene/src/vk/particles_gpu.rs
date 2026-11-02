@@ -384,6 +384,19 @@ impl ParticlesGpu {
     /// Syncs the previous dispatch's life column into `pool` (offset 3 of each slot), from the compact async readback.
     /// No-op on the first step; waits only if a same-frame step hasn't left the GPU a gap.
     pub fn sync_pool(&mut self, gpu: &Gpu, pool: &mut [f32]) {
+        self.finish(gpu, Some(pool));
+    }
+
+    /// Drops a pending readback unread. The pool it describes is gone - rebuilt by the XMB's start, resized, or moved
+    /// by the CPU since that dispatch - so writing its life column over the new pool would raise phantoms: slots alive
+    /// at the origin, in front of the camera, and still on the free list. The buffer is unmapped all the same, so the
+    /// next `run` can copy into it; that run uploads the whole pool.
+    pub fn discard(&mut self, gpu: &Gpu) {
+        self.finish(gpu, None);
+    }
+
+    /// Settles the pending readback: waits for its map, reads it into `pool` if asked, and unmaps.
+    fn finish(&mut self, gpu: &Gpu, pool: Option<&mut [f32]>) {
         if !self.pending {
             return;
         }
@@ -391,11 +404,13 @@ impl ParticlesGpu {
             let _ = gpu.device.poll(wgpu::PollType::wait_indefinitely());
         }
         if self.readback_state.load(Ordering::SeqCst) == 2 {
-            if let Ok(d) = self.life_readback.slice(..).get_mapped_range() {
-                for (s, c) in d.as_chunks::<4>().0.iter().enumerate() {
-                    let o = s * STRIDE + 3;
-                    if o < pool.len() {
-                        pool[o] = f32::from_le_bytes(*c);
+            if let Some(pool) = pool {
+                if let Ok(d) = self.life_readback.slice(..).get_mapped_range() {
+                    for (s, c) in d.as_chunks::<4>().0.iter().enumerate() {
+                        let o = s * STRIDE + 3;
+                        if o < pool.len() {
+                            pool[o] = f32::from_le_bytes(*c);
+                        }
                     }
                 }
             }
@@ -501,6 +516,9 @@ pub struct ParticleTask<'a> {
 impl GpuTask for ParticleTask<'_> {
     fn sync_pool(&mut self, pool: &mut [f32]) {
         self.backend.sync_pool(self.gpu, pool);
+    }
+    fn discard(&mut self) {
+        self.backend.discard(self.gpu);
     }
     fn read_full(&mut self, pool: &mut [f32]) {
         self.backend.read_full(self.gpu, pool);
