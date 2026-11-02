@@ -1,0 +1,150 @@
+# Testing Nagare
+
+Two layers guard the native app: **unit tests** (fast, logic) and **regression shots** (the scene
+drawn and compared pixel-for-pixel). Neither needs firmware. This doc says what they cover, what
+they do *not*, and how to add to them.
+
+> The golden rule, from `CLAUDE.md`: **OpenGL's (and Vulkan's) output must not change** across a
+> change to shared rendering code — `--test` shots before and after are compared **byte for byte**.
+> The shots are the safety net for every refactor of the scene, the wave, the particles, the passes,
+> or the enhancements.
+
+---
+
+## Layer 1 — unit tests
+
+```
+cargo xtask check      # clippy (3 targets + xtask), warnings as errors, then `cargo test --release`
+cargo test --release   # just the tests
+```
+
+27 tests today, in: `audio`, `intro`, `maru`, `shield`, `single`, `state`, `update`, `version`,
+`vk/glsl`, `vk/wave_gpu`. They cover pure logic that's painful to eyeball — audio onset/pitch math,
+maru's mouth/schedule, the live-state record's seqlock codec, the update manifest + version ordering,
+the GLSL rewrite for naga, the GPU wave math, etc.
+
+**Add one** next to the code it checks, in a `#[cfg(test)] mod tests`. Good candidates: anything
+with a formula, a state machine, a boundary (clamp/threshold), or a parser. Keep them deterministic
+and free of GPU/OS calls so they run in CI on all three targets.
+
+---
+
+## Layer 2 — regression shots (the pixel-for-pixel net)
+
+### What makes them reproducible
+
+`--test` turns a run into the same bytes every time:
+
+- fixed clock (`--test-date`, default `2026-06-15T20:30:00`; the shots matrix overrides it to `2007-08-11T01:37:00`; `--test-dt` for the step),
+- seeded particle emitter, no saved config read or written,
+- **no audio** (WASAPI loopback is off under `--test`), **no network**, no intro/benchmark/warning,
+- `--size` fixed, frame contents a pure function of time.
+
+So anything driven by *live sound* (the audio-reactive brightness, the beat/kick camera bounce, the
+disco beat-lights, the bass flicker) does **not** move under `--test`. Scene states that depend on
+sound must be reached by **setting**, not by sound (see the disco runs below).
+
+### The flow
+
+```
+cargo xtask shots DIR            # draw the matrix into DIR (two PNGs + a report per run)
+cargo xtask compare DIR1 DIR2    # byte-compare every PNG; errors if any differ
+```
+
+Around any change to shared/rendering code:
+
+```
+# 1. baseline BEFORE the change
+cargo build --release --bin nagare
+cargo xtask shots ../_shots/old
+
+# 2. make the change, rebuild
+cargo build --release --bin nagare
+
+# 3. shots AFTER, and compare
+cargo xtask shots ../_shots/new
+cargo xtask compare ../_shots/old ../_shots/new   # want: "all N shots are the same to the byte"
+```
+
+Both renderers must match. `compare` keys on file name, so `old` and `new` must be shot with the
+**same `SHOT_RUNS`** (don't edit the matrix between baseline and re-shot).
+
+### The matrix (`SHOT_RUNS` in `xtask/src/main.rs`)
+
+Each run draws the seeded fixed-clock scene with maru held on screen (`maruAt=0.4`) and shoots at
+`t=6` and `t=25`.
+
+| Run | Covers |
+|---|---|
+| `gl`, `vk` | default night scene, each renderer |
+| `vkss` | Vulkan supersampling path |
+| `glid` | OpenGL with AA / sharpen / AE off (console-original passes) |
+| `gl-day`, `vk-day` | the **auto** backdrop by day (June, 10:00, `seasonPass=0`), each renderer |
+| `vk-music` | the **music** backdrop program (`musicPlaying=1`) |
+| `vk-season` | **Season Pass** on a fixed month (`seasonPassStart=12`, with `startTransition=1`) |
+| `gl-disco`, `vk-disco` | the **disco ball** down + its spots/lit-wave (`musicPlaying=1 discoWithMusic=1 discoRiseSec=2`), each renderer |
+
+Why those knobs:
+- `--test` has no audio, so disco is dropped deterministically by `discoWithMusic` (it does not
+  wait on heavy bass — `disco.rs`), and lowered fast (`discoRiseSec=2`) so it's down by `t=6`.
+- The default runs leave `seasonPass` at its real default (On), so the day runs set it Off to
+  exercise the **auto** month backdrop instead.
+- `vk-season` adds `startTransition=1` because the default `--test` run plays the XMB start
+  (`scene.sequence = "coldboot"`), during which the scene is **not "resting"** and Season Pass is
+  gated off (`scene.rs`); the background-fade start lets the scene rest so the forced month
+  actually reaches the backdrop. Without it the run is a silent no-op (identical to the default).
+
+### What the shots do NOT cover (look with your eyes too)
+
+The net only sees what it captures. After a shared-code change, a quick real-app look is still
+wise, because these are out of scope for `--test`:
+
+- **Audio-reactive motion** — brightness-with-loudness, the beat/kick bounce, bass flicker, the
+  disco **beat-lights**, maru's mouth singing. All need live sound; static or absent under `--test`.
+- **Scene states not in the matrix** — other months/hours, the XMB start sequence and boot
+  transitions, the epilepsy warning, the first-run benchmark/intro, Season Pass *mid-crossfade*.
+- **Both-renderer parity under odd settings** — only the listed `--set` combinations are shot; an
+  unusual settings mix could shift without a shot noticing.
+- **The app shell** — the egui settings panel, tray, wallpaper placement, Software Update,
+  neighbour rules, autostart, single-instance. None are in the shot path.
+- **The software (WARP) renderer** — too slow to shoot; skipped on purpose.
+
+### Adding a scenario
+
+1. Add a `(name, &["--renderer", ..., "--set", "k=v", ...])` row to `SHOT_RUNS`. Keep it
+   **deterministic**: reach the state by `--set` / `--test-date`, never by sound or timing luck.
+   `--set` accumulates; a later `--test-date` wins over the default.
+2. Confirm it's reproducible: `shots` into two dirs and `compare` them — must be byte-identical to
+   itself before you trust it.
+3. It becomes part of the baseline from then on; re-shoot old and new together.
+
+Handy one-offs for eyeballing a specific moment (not part of the matrix):
+`--shot SEC=FILE`, `--set KEY=VALUE`, `--set-at SEC:KEY=VALUE`, `--report FILE`, `--exit-after SEC`,
+`--window` to watch it live, `--perf-overlay 2` for per-stage costs.
+
+---
+
+## Layer 3 — raw CPU-vs-GPU data (`wavediff`)
+
+The shots are a *pixel* net: they tell whether the final image is identical, not whether the GPU builds the **same
+geometry** as the CPU. `cargo xtask wavediff` closes that gap — it dumps the wave mesh (`VERTICES * RECORD` floats,
+position then normal per vertex) built each way and reports how far apart they are.
+
+```
+cargo xtask wavediff            # runs Nagare twice under Vulkan (gpuWave=0, then =1) and diffs the two dumps
+cargo xtask wavediff A B        # diffs two dumps already taken with --dump-wave
+```
+
+Under the hood, `--dump-wave SEC=FILE` writes the mesh at a fixed frame: the CPU program's, or - when `gpuWave` built
+it - the GPU's, read back from the compute buffer. Same `--test` clock and seed, so the only difference is the build
+path. It prints the bit-identical count, the mean and max absolute difference, and the worst float. For the wave this
+is essentially nil: the GPU runs the console's program in f64 where it can, matching the CPU to about one ULP. The
+particle sim will reuse this `--dump-*` + diff pattern once its GPU path lands.
+
+---
+
+## Before a commit
+
+`cargo xtask ready` runs `check`, records a fresh PGO profile, and builds the installer — the full
+pre-commit gate. For day-to-day work, `cargo xtask check` + a regression `shots`/`compare` around
+any shared-code change is enough; PGO only matters for release/perf builds.

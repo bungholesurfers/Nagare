@@ -16,6 +16,7 @@ pub mod gpu;
 pub mod particles;
 pub mod programs;
 pub mod scene;
+pub mod particles_gpu;
 pub mod wave_gpu;
 
 use std::sync::atomic::{AtomicU8, Ordering};
@@ -195,6 +196,8 @@ pub struct VkGfx {
     blur: blur::Blur,
     wave: Option<wave_gpu::WaveGpu>,
     wave_error: Option<String>,
+    /// `particles.elf`'s update task on the GPU (gpuParticles); the CPU still emits and keeps the free list.
+    particle_gpu: Option<particles_gpu::ParticlesGpu>,
     present: Program,
     sharpen: Program,
     maru: Program,
@@ -430,6 +433,9 @@ impl VkGfx {
         let wave = wave_gpu::WaveGpu::new(&gpu, double);
         let wave_error = unscope(scoped);
         let wave = if wave_error.is_none() { Some(wave) } else { None };
+        // The particle update task on the GPU: its shader compiles in single precision too, so it is made regardless of
+        // f64 support (unlike the wave). The pool starts at the XMB's size; run_frame resizes it to particleLimit.
+        let particle_gpu = Some(particles_gpu::ParticlesGpu::new(&gpu, double, crate::sim::POOL));
         Ok(VkGfx {
             egui,
             overlay,
@@ -438,6 +444,7 @@ impl VkGfx {
             blur,
             wave,
             wave_error,
+            particle_gpu,
             present,
             sharpen,
             maru,
@@ -501,6 +508,24 @@ impl VkGfx {
     /// Whether spline.elf can run on this GPU, or why not.
     pub fn wave_error(&self) -> Option<&str> {
         self.wave_error.as_deref()
+    }
+
+    /// The GPU-built wave mesh read back (`VERTICES * RECORD` floats), if the GPU actually built it this frame - for the
+    /// raw CPU-vs-GPU comparison (`--dump-wave`). None when the CPU built the wave (gpuWave off or fallen back).
+    pub fn wave_mesh_gpu(&self) -> Option<Vec<f32>> {
+        if self.wave_built {
+            self.wave.as_ref().map(|w| w.read_mesh(&self.gpu))
+        } else {
+            None
+        }
+    }
+
+    /// A `GpuTask` over the particle backend for this frame, or None if the GPU particle task isn't available (so the
+    /// CPU runs it). The simulation drives it through the `GpuTask` seam, staying renderer-independent.
+    pub fn particle_task(&mut self) -> Option<particles_gpu::ParticleTask<'_>> {
+        let gpu = &self.gpu;
+        let backend = self.particle_gpu.as_mut()?;
+        Some(particles_gpu::ParticleTask { gpu, backend })
     }
 
     pub fn resize(&mut self, width: u32, height: u32) {
@@ -596,9 +621,11 @@ impl VkGfx {
         }
     }
 
-    pub fn draw_particles(&mut self, system: &crate::particles_sim::System, palette: &[u32], gamma: f64) {
+    pub fn draw_particles(&mut self, system: &crate::particles_sim::System, palette: &[u32], gamma: f64, gpu_particles: bool) {
         let (Some(encoder), Some(canvas)) = (self.encoder.as_mut(), self.canvas.as_ref()) else { return };
-        self.particles.draw(&self.gpu, encoder, canvas, system, palette, gamma);
+        // When the GPU ran the sim this frame, draw straight from its buffers (indirect count), no vertex upload.
+        let gpu_source = if gpu_particles { self.particle_gpu.as_ref().map(|p| (&p.verts, &p.args)) } else { None };
+        self.particles.draw(&self.gpu, encoder, canvas, system, palette, gamma, gpu_source);
     }
 
     /// Draws maru-chan's triangles (`maru.rs`) over the canvas, at the scene's `fade`.

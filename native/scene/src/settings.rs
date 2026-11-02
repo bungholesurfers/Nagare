@@ -363,6 +363,7 @@ settings_struct!(NativeSettings {
     // 3 stop.
     renderer: "renderer" = 1.0,
     gpu_wave: "gpuWave" = 1.0,
+    gpu_particles: "gpuParticles" = 1.0,
     render_scale: "renderScale" = 1.0,
     software_lite: "softwareLite" = 1.0,
     update_auto_install: "updateAutoInstall" = 0.0,
@@ -526,13 +527,13 @@ pub fn meta_of(table: &'static [Meta], key: &str) -> Option<&'static Meta> {
     table.iter().find(|m| m.key == key)
 }
 
-/// Where the panel shows each setting: its tab and its section, in this order.
 /// The music scene's listening section, whose settings the panel shows in groups by their names' first word.
 pub const VISUALIZER: &str = "Music Theme Audio Visualizer";
 
 /// The sections shown in groups by their settings' names' first word, a little space between each.
 pub const GROUPED: &[&str] = &[VISUALIZER];
 
+/// Where the panel shows each setting: its tab and its section, in this order.
 pub struct Section {
     pub tab: &'static str,
     pub section: &'static str,
@@ -758,7 +759,7 @@ pub const NATIVE_LAYOUT: &[Section] = &[
     Section { tab: "Panel", section: "Background blur", keys: &["blurEnabled", "windowBackdrop", "backdropTint", "sceneBlurRadius", "sceneBlurSaturation", "sceneBlurGrain", "windowTheme", "acrylicOpacity", "windowCorners"] },
     Section { tab: "Panel", section: "Opening the settings", keys: &["pokesToOpen", "pokeBounce", "logoOnRightClick"] },
     Section { tab: "Panel", section: "Size", keys: &["uiScale"] },
-    Section { tab: "Resources", section: "Graphics", keys: &["renderer", "gpuWave", "renderScale", "softwareLite", "tripleBuffering", "tripleBufferingMusicOff"] },
+    Section { tab: "Resources", section: "Graphics", keys: &["renderer", "gpuWave", "gpuParticles", "renderScale", "softwareLite", "tripleBuffering", "tripleBufferingMusicOff"] },
     Section { tab: "Resources", section: READING_THE_ROOM, keys: &["whenOtherFocused", "whenOtherMaximized", "whenOtherFullscreen", "whenOnBattery", "whenGpuMemoryLow", "gpuMemoryThreshold", "limitFps", "stopTransition", "stopTransitionUrgent", "stopHideWindow", "resumeTransition"] },
     Section { tab: "Resources", section: "CPU", keys: &["cpuPlacement", "cpuEcoQoS", "cpuPriority"] },
     Section { tab: "Resources", section: "Software Update", keys: &["updateChannel", "updateAutoInstall"] },
@@ -928,6 +929,7 @@ pub static NATIVE_META: &[Meta] = &[
     m("updateAutoInstall", 0.0, 1.0, 1.0, "Whether an update Software Update has downloaded and checked installs by itself - once nothing is full screen - or waits for you. Off, a card on the desktop (and the panel's top) shows what was downloaded, with Install now, Later and What's new. Only a copy the installer installed can install updates.\nThe panel's top has Software Update's Auto-check, Check now and Reinstall").select(OFF_ON),
     m("softwareLite", 0.0, 1.0, 1.0, "While the software renderer draws - chosen, or fallen back to - the heavier features are left out without touching their settings, which the panel marks: supersampling, maru-chan's supersampling, motion blur and scene light, the disco ball's supersampling, beams and floor, sharpening, FXAA, the settings' blur, renderScale above 0.5, and gpuWave (the spline mesh built on the CPU). Off draws everything as set.").select(OFF_ON),
     m("gpuWave", 0.0, 1.0, 1.0, "Where the wave is built under Vulkan - the deformation of the 361 points and the 128 x 128 surface, the console's SPU program. GPU: as compute passes, in double precision where the GPU has it, the CPU working out only the vertices the particles are emitted from. CPU: as the OpenGL renderer always does, its mesh uploaded every frame.\nVulkan only").select(&[(0.0, "CPU"), (1.0, "GPU")]).when("renderer", &[1.0, 2.0]),
+    m("gpuParticles", 0.0, 1.0, 1.0, "Where particles.elf's per-particle update task runs under Vulkan. GPU: as a compute pass, in double precision where the GPU has it, the pool kept on the GPU and drawn from there (an indirect draw); the CPU still emits, keeps the free list and reads the controller. CPU: the whole task on the CPU, as the OpenGL renderer always does. The GPU matches the CPU to a few ULP (its quaternion tumble drifts, being f32 trig - the orientation only), and is a touch faster.\nVulkan only").select(&[(0.0, "CPU"), (1.0, "GPU")]).when("renderer", &[1.0, 2.0]),
     m("cpuPlacement", 0.0, 2.0, 1.0, "Which cores the app's threads keep to - softly, so the system may still move them when those are taken. Efficiency cores: on a hybrid CPU (P- and E-cores), the E-cores; elsewhere the system decides. One cache cluster: the cores sharing one cache - one cluster of E-cores sharing an L2, or one L3 of a CPU with several (AMD's CCDs) - so the threads' data stays in it. Threads the driver starts later follow too.\nWindows' CPU sets, Linux's affinity, macOS's Background QoS").select(&[(0.0, "System decides"), (1.0, "Efficiency cores"), (2.0, "One cache cluster")]),
     m("cpuEcoQoS", 0.0, 1.0, 1.0, "Windows 11's EcoQoS: tells the system the app's speed matters less than its power, so it prefers the efficiency cores and lower clocks. Off leaves it to the system.\nWindows only").select(OFF_ON),
     m("cpuPriority", 0.0, 2.0, 1.0, "The app's priority: below normal lets every program at normal priority run first when they compete for the CPU. Auto: normal while Nagare or the desktop has the keyboard - the scene, its settings, the wallpaper in view - and below normal while another program has it.\nWindows' priority class, Linux's niceness, macOS's QoS; Auto reads the focus on Windows only, normal elsewhere").select(&[(0.0, "Normal"), (1.0, "Below normal"), (2.0, "Auto")]),

@@ -558,12 +558,6 @@ impl SceneThemes {
         &self.layers[layer].keys
     }
 
-    /// The moment last handed to the backdrop (0x10900, through 0x1adc8 and 0x1b090), how long it takes to ease in,
-    /// and a count of the hand-overs. The scene's clock hands it the moment it shows on each of its ticks, a second
-    /// apart (0x12284, 0x11c58), over a second, but not while something holds the clock: the XMB's start until
-    /// ShowGUI, a content's boot, or the music while its set is in or on its way out. The XMB's start hands it 10:00
-    /// of the day over 7.5 s as it begins (BootBG2). The first frame hands the moment at once, as if the XMB had been
-    /// running.
     /// Why Season Pass's month does not show now, if it does not: what holds the backdrop's colours instead.
     pub fn season_held(&self, scene: &Scene) -> Option<&'static str> {
         if self.playing.is_some() {
@@ -605,6 +599,12 @@ impl SceneThemes {
         (now < self.season_until).then_some(self.season_until - now)
     }
 
+    /// The moment last handed to the backdrop (0x10900, through 0x1adc8 and 0x1b090), how long it takes to ease in,
+    /// and a count of the hand-overs. The scene's clock hands it the moment it shows on each of its ticks, a second
+    /// apart (0x12284, 0x11c58), over a second, but not while something holds the clock: the XMB's start until
+    /// ShowGUI, a content's boot, or the music while its set is in or on its way out. The XMB's start hands it 10:00
+    /// of the day over 7.5 s as it begins (BootBG2). The first frame hands the moment at once, as if the XMB had been
+    /// running.
     pub fn backdrop_moment(&mut self, scene: &Scene, now: f64, at: NaiveDateTime, season: Option<Season>) -> Moment {
         let tick = now.floor() as i64;
         let serial = self.handed.as_ref().map_or(0, |h| h.serial + 1);

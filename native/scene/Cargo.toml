@@ -1,0 +1,51 @@
+[package]
+name = "nagare-scene"
+version = "0.1.4"
+edition = "2021"
+description = "Nagare's scene renderer - the wave, particles, backdrop, post-processing and enhancements - as a reusable library on OpenGL and Vulkan, shared by the wallpaper app and other front-ends"
+license = "MIT"
+
+# The renderer and the platform bits its scene modules need (audio, thread placement, perf). It draws with a glow
+# context or a wgpu surface the caller provides; context/window creation (glutin, the wallpaper, the tray, the updater)
+# stays in the front-end, not here.
+[dependencies]
+glow = "0.17"
+winit = "0.30"
+raw-window-handle = "0.6"
+# The bundled emoji fonts, as egui had them by default before 0.37: the tabs' and the overlay's symbols.
+egui = { version = "0.37", features = ["monochrome_emoji_fonts"] }
+egui_glow = { version = "0.37", features = ["winit"] }
+egui-winit = "0.37"
+egui-wgpu = { version = "0.37", features = ["winit"] }
+wgpu = { version = "30", features = ["glsl"] }
+pollster = "0.4"
+chrono = { version = "0.4", default-features = false, features = ["clock", "std"] }
+serde_json = "1"
+png = "0.18"
+
+[target.'cfg(unix)'.dependencies]
+libc = "0.2"
+
+[target.'cfg(windows)'.dependencies]
+windows-sys = { version = "0.59", features = [
+  "Win32_Foundation",
+  "Win32_Graphics_Gdi",
+  "Win32_UI_WindowsAndMessaging",
+  "Win32_UI_Shell",
+  "Win32_UI_Input",
+  "Win32_UI_Input_KeyboardAndMouse",
+  "Win32_System_Threading",
+  "Win32_System_LibraryLoader",
+  "Win32_System_Power",
+  "Win32_System_RemoteDesktop",
+  "Win32_System_SystemServices",
+  "Win32_System_SystemInformation",
+  "Win32_System_Diagnostics_ToolHelp",
+  "Win32_System_Kernel",
+  "Win32_System_Performance",
+  "Win32_Graphics_Dwm",
+  "Win32_UI_Controls",
+  "Win32_System_Registry",
+  "Win32_Security",
+] }
+windows = { version = "0.62.2", features = ["Media_Control", "Foundation", "Foundation_Collections", "Win32_System_WinRT", "Win32_Graphics_Dxgi", "Win32_Media_Audio", "Win32_System_Com", "Win32_System_Com_StructuredStorage", "Win32_System_Variant", "UI_Notifications", "Data_Xml_Dom"] }

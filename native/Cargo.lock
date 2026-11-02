@@ -2044,7 +2044,7 @@ dependencies = [
 
 [[package]]
 name = "nagare"
-version = "0.1.3"
+version = "0.1.4"
 dependencies = [
  "ab_glyph",
  "chrono",
@@ -2059,6 +2059,8 @@ dependencies = [
  "glutin",
  "glutin-winit",
  "libc",
+ "memmap2",
+ "nagare-scene",
  "png",
  "pollster",
  "raw-window-handle",
@@ -2068,6 +2070,27 @@ dependencies = [
  "tray-icon",
  "ttf-parser",
  "ureq",
+ "wgpu",
+ "windows",
+ "windows-sys 0.59.0",
+ "winit",
+]
+
+[[package]]
+name = "nagare-scene"
+version = "0.1.4"
+dependencies = [
+ "chrono",
+ "egui",
+ "egui-wgpu",
+ "egui-winit",
+ "egui_glow",
+ "glow",
+ "libc",
+ "png",
+ "pollster",
+ "raw-window-handle",
+ "serde_json",
  "wgpu",
  "windows",
  "windows-sys 0.59.0",

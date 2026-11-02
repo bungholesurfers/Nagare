@@ -13,51 +13,32 @@
 // negated comparisons and its indexed loops.
 #![allow(clippy::approx_constant, clippy::neg_cmp_op_on_partial_ord, clippy::needless_range_loop)]
 
-mod audio;
-mod auto_exposure;
+pub use nagare_scene::{
+    antialias, audio, auto_exposure, backdrop, blur, cpu, disco, gl_util, input, intro, maru, months, particles,
+    particles_sim, perf, postprocess, scene, settings, sharpen, sim, spline, state, steamboat, vk, warning, wave,
+    write_png,
+};
 mod autostart;
-mod backdrop;
-mod blur;
 mod config;
-mod cpu;
-mod disco;
-mod gl_util;
-mod input;
-mod intro;
 mod media;
-mod antialias;
 mod logo;
 mod machine;
-mod maru;
-mod months;
 mod neighbour;
 mod panel;
-mod particles;
-mod particles_sim;
-mod perf;
-mod postprocess;
 #[cfg(windows)]
 mod presence;
-mod scene;
-mod settings;
 mod settings_window;
 mod shield;
 mod signing;
 mod single;
-mod sharpen;
-mod sim;
-mod spline;
-mod steamboat;
+mod state_publish;
 mod update;
 mod version;
 #[cfg(windows)]
 mod tray;
 #[cfg(windows)]
 mod wallpaper;
-mod vk;
 mod watchdog;
-mod wave;
-mod warning;
 
 use std::num::NonZeroU32;
 use std::sync::Arc;
@@ -136,6 +117,9 @@ Testing and profiling:
                      switches to Vulkan mid-run); may be given again
   --shot SEC=FILE    saves the frame drawn when the scene's clock reaches SEC seconds as a PNG (the scene, and the
                      panel if it shows, without the overlay); may be given again for more shots
+  --dump-wave SEC=FILE
+                     saves the wave mesh (raw f32: the CPU program's, or the GPU's when gpuWave built it) when the
+                     clock reaches SEC; compared CPU-vs-GPU by `cargo xtask wavediff`
   --exit-after SEC   exits once the scene's clock reaches SEC seconds
   --report FILE      on exit, writes each stage's CPU time and each pass's GPU time (mean, median, 95th and 99th
                      percentile, worst) as JSON, and prints a summary
@@ -163,6 +147,12 @@ struct Options {
     sets_at: Vec<(f64, String, f64)>,
     /// The scene times to save a frame at, with where, soonest first.
     shots: Vec<(f64, std::path::PathBuf)>,
+    /// The scene times to dump the wave mesh at (raw f32: the CPU program's, or the GPU's when gpuWave built it), with
+    /// where, soonest first - for the raw CPU-vs-GPU comparison (`cargo xtask wavediff`).
+    dump_wave: Vec<(f64, std::path::PathBuf)>,
+    /// The scene times to dump the particle pool at (raw f32, slot-indexed), with where - the CPU-vs-GPU comparison
+    /// for gpuParticles (`cargo xtask wavediff --particles`).
+    dump_particles: Vec<(f64, std::path::PathBuf)>,
     exit_after: Option<f64>,
     report: Option<std::path::PathBuf>,
     warmup: f64,
@@ -538,6 +528,16 @@ fn decode_png(bytes: &[u8]) -> Option<egui::ColorImage> {
 }
 
 /// Saves the window's frame as drawn so far (the back buffer) as an opaque PNG.
+/// Writes a wave mesh (a flat `f32` array, position then normal per vertex) as raw little-endian f32 bytes, for the
+/// raw CPU-vs-GPU comparison `cargo xtask wavediff` reads back.
+fn dump_wave_mesh(mesh: &[f32], path: &std::path::Path) -> Result<(), String> {
+    let mut bytes = Vec::with_capacity(mesh.len() * 4);
+    for f in mesh {
+        bytes.extend_from_slice(&f.to_le_bytes());
+    }
+    std::fs::write(path, bytes).map_err(|e| format!("{}: {e}", path.display()))
+}
+
 fn screenshot(gl: &glow::Context, width: i32, height: i32, path: &std::path::Path) -> Result<(), String> {
     let (w, h) = (width.max(0) as usize, height.max(0) as usize);
     let mut pixels = vec![0u8; w * h * 4];
@@ -569,16 +569,6 @@ fn keep_renderer(value: &mut serde_json::Value, saved: &Option<serde_json::Value
     } else {
         changed.insert("renderer".to_string(), saved.clone());
     }
-}
-
-/// Writes `rgba`, rows from the top, as a PNG.
-fn write_png(path: &std::path::Path, width: u32, height: u32, rgba: &[u8]) -> Result<(), String> {
-    let file = std::fs::File::create(path).map_err(|e| e.to_string())?;
-    let mut encoder = png::Encoder::new(std::io::BufWriter::new(file), width, height);
-    encoder.set_color(png::ColorType::Rgba);
-    encoder.set_depth(png::BitDepth::Eight);
-    let mut writer = encoder.write_header().map_err(|e| e.to_string())?;
-    writer.write_image_data(rgba).map_err(|e| e.to_string())
 }
 
 /// What the app is doing for other programs, by the Resources tab's conditions.
@@ -867,6 +857,12 @@ struct App {
     /// The disco ball, which heavy bass brings down.
     disco: disco::Disco,
     music_on: bool,
+    /// Publishes Nagare's live state to a memory-mapped file so other programs can read what it is showing and doing
+    /// (aegis-nagare for lock-screen continuity, a shell mod for taskbar reactions). None under --test or when off.
+    state_pub: Option<state_publish::Publisher>,
+    /// The published state, kept and updated in place so publishing allocates nothing per frame (the palette and theme
+    /// buffers are reused, rewritten only when they change).
+    published: state::State,
     /// The desktop's mouse as last read, while the scene is the wallpaper: the buttons, and whether it was over the
     /// desktop.
     #[cfg(windows)]
@@ -1016,6 +1012,14 @@ impl App {
         // On in a new config.
         let maru = saved.as_ref().and_then(|v| v["maruTime"].as_bool()).unwrap_or(true);
         config_saved["maruTime"] = maru.into();
+        // The live-state channel: publish Nagare's state to a memory-mapped file for other programs to read. On in a
+        // new config; never under --test (no file writes, determinism). The file sits beside config.json.
+        let state_channel = saved.as_ref().and_then(|v| v["stateChannel"].as_bool()).unwrap_or(true);
+        config_saved["stateChannel"] = state_channel.into();
+        let state_pub = (options.test.is_none() && state_channel)
+            .then(config::dir)
+            .flatten()
+            .map(|d| state_publish::Publisher::open(&d.join("state.v1.bin")));
         // The epilepsy warning, at the first start ever - a test's counts as a later one - or at every start.
         let warning_seen = saved.as_ref().and_then(|v| v["epilepsyWarningSeen"].as_bool()).unwrap_or(false) || options.test.is_some();
         config_saved["epilepsyWarningSeen"] = warning_seen.into();
@@ -1174,6 +1178,8 @@ impl App {
             maru_heard: maru::Heard::default(),
             disco: disco::Disco::default(),
             music_on: false,
+            state_pub,
+            published: state::State::default(),
             #[cfg(windows)]
             desktop: (false, false, false),
             #[cfg(windows)]
@@ -2260,8 +2266,10 @@ impl App {
         match &mut gfx.back {
             Back::Gl(g) => {
                 let interval = match self.pacing {
-                    Pacing::Vsync { .. } => SwapInterval::Wait(NonZeroU32::new(1).unwrap()),
-                    Pacing::Divided { every, .. } => SwapInterval::Wait(NonZeroU32::new(every).unwrap()),
+                    // Divided uses an ordinary every-refresh vsync and divides on the CPU (the deadline pacing below):
+                    // drivers widely ignore swap intervals > 1, especially on high-refresh displays under DWM, which
+                    // left the rate at period/0.9 (e.g. 66 fps for a 60 fps cap on 240 Hz).
+                    Pacing::Vsync { .. } | Pacing::Divided { .. } => SwapInterval::Wait(NonZeroU32::new(1).unwrap()),
                     Pacing::Timer { .. } | Pacing::Free => SwapInterval::DontWait,
                 };
                 if let Err(e) = g.surface.set_swap_interval(&g.context, interval) {
@@ -2661,6 +2669,56 @@ impl App {
         actions
     }
 
+    /// Fills a `state::State` from this frame and publishes it to the live-state file - the appearance (so a reader
+    /// needs nothing else) and the live moment (scene clock, fade, music/beat, Nagare-maru). Cheap: it only writes to a
+    /// memory mapping. See `state_publish` and `nagare_scene::state`.
+    fn publish_state(&mut self, date: chrono::NaiveDateTime, gamma: f64) {
+        use chrono::{TimeZone, Timelike};
+        let now_ms = state::now_unix_ms();
+        // Nagare-maru's on-screen box gives both whether it's visible and roughly how far it has sailed.
+        let (maru_sailing, maru_progress) = match self.maru_chan.bounds {
+            Some([x0, _, x1, _]) => (true, (((x0 + x1) * 0.5 + 1.0) * 0.5).clamp(0.0, 1.0)),
+            None => (false, 0.0),
+        };
+        let scene_unix_ms = chrono::Local
+            .from_local_datetime(&date)
+            .single()
+            .map(|dt| dt.timestamp_millis().max(0) as u64)
+            .unwrap_or(now_ms);
+        // Update the kept record in place; the theme and palette buffers are rewritten only when they change, so a
+        // steady frame allocates nothing here.
+        let s = &mut self.published;
+        s.pid = std::process::id();
+        s.updated_unix_ms = now_ms;
+        s.scene_unix_ms = scene_unix_ms;
+        if s.theme != self.scene.theme {
+            s.theme.clear();
+            s.theme.push_str(self.scene.theme);
+        }
+        s.theme_brightness = self.scene.theme_brightness;
+        s.theme_color = self.scene.theme_color;
+        s.video_output = self.scene.video_output;
+        s.season_pass = self.native_settings.season_pass as i32;
+        s.season_pass_start = self.native_settings.season_pass_start as i32;
+        s.season_pass_months = self.native_settings.season_pass_months as u32;
+        if s.palette != self.scene.iridescent_palette {
+            s.palette.clear();
+            s.palette.extend_from_slice(&self.scene.iridescent_palette);
+        }
+        s.day_fraction = date.num_seconds_from_midnight() as f32 / 86_400.0;
+        s.fade = self.sim.fade.value as f32;
+        s.gamma = gamma as f32;
+        s.music_level = (self.audio_response.activity as f32).clamp(0.0, 1.0);
+        s.bass_level = (self.audio_response.bass_level as f32).clamp(0.0, 1.0);
+        s.beat = (self.audio_response.bounce as f32).max(0.0);
+        s.maru_progress = maru_progress;
+        s.music_playing = self.music_on;
+        s.maru_sailing = maru_sailing;
+        if let Some(p) = &mut self.state_pub {
+            p.publish(&self.published);
+        }
+    }
+
     fn frame(&mut self) {
         // A test's clock moves on exactly its step a frame; otherwise it is the wall's.
         let now = match &self.options.test {
@@ -2828,6 +2886,11 @@ impl App {
         let f = FrameAt { now, dt, date, fade, gamma, moment, width, height, scale };
         let actions = if matches!(gfx.back, Back::Gl(_)) { self.frame_gl(&mut gfx, &f) } else { self.frame_vk(&mut gfx, &f) };
 
+        // Publish this frame's state for other programs to read (never under --test; no-op when off).
+        if self.state_pub.is_some() {
+            self.publish_state(date, gamma);
+        }
+
         if let Pacing::Timer { period, next } = &mut self.pacing {
             let period = Duration::from_secs_f64(*period);
             let now = Instant::now();
@@ -2844,10 +2907,12 @@ impl App {
         };
         let vulkan = matches!(gfx.back, Back::Vk(_));
         match (vsync_period, self.pacing.divided_every()) {
-            // Vulkan has no swap interval, and presents without waiting: a divided rate is kept by deadlines exactly
-            // its period apart, each frame then shown at the refresh after it. The system's sleep alone - a spin, every
-            // frame, would cost a tenth of a core - since the refresh, not the sleep, decides when it shows.
-            (Some(period), Some(_)) if vulkan => {
+            // A divided rate is kept by deadlines exactly its period apart, each frame then shown at the refresh after
+            // it - on both backends. Vulkan presents without waiting; OpenGL uses an ordinary every-refresh vsync (its
+            // swap interval > 1 is unreliable), so the CPU deadline does the dividing either way. The system's sleep
+            // alone is enough - a spin every frame would cost a tenth of a core - since the refresh, not the sleep,
+            // decides when the frame shows.
+            (Some(period), Some(_)) => {
                 let period = Duration::from_secs_f64(period);
                 let now = Instant::now();
                 let deadline = match self.vk_next {
@@ -2945,7 +3010,10 @@ impl App {
 
     /// The particles' part of a frame, whichever API draws: behind the icons the mouse is read from the desktop, then
     /// the particles are emitted from the wave just built, sharing its clock.
-    fn run_particles(&mut self, window: &Window, f: &FrameAt) {
+    // `as_deref_mut` reborrows the `Option<&mut dyn>` so it can be used again after update_particles (for the dump
+    // flush); clippy flags it as a no-op type-wise, but the reborrow is needed.
+    #[allow(clippy::needless_option_as_deref)]
+    fn run_particles(&mut self, window: &Window, f: &FrameAt, mut gpu: Option<&mut (dyn particles_sim::GpuTask + '_)>) {
         #[cfg(windows)]
         self.desktop_pointer(window, f.now, f.width as f64, f.height as f64, f.scale);
         #[cfg(not(windows))]
@@ -2968,7 +3036,23 @@ impl App {
             f.width,
             f.height,
             f.fade.as_ref(),
+            gpu.as_deref_mut(),
         );
+        // Raw particle-pool dumps for the CPU-vs-GPU comparison.
+        let dumps = self.due_particle_dumps(f.now);
+        if !dumps.is_empty() {
+            // Read the whole GPU-resident pool into the CPU pool first, so the dump has the real positions/quaternions
+            // (the per-step sync only carries the life column). Test-only; it waits on the GPU.
+            if let Some(g) = gpu.as_deref_mut() {
+                g.read_full(self.sim.particles.pool_mut());
+            }
+            for (at, path) in dumps {
+                match dump_wave_mesh(self.sim.particles.pool(), &path) {
+                    Ok(()) => println!("particle dump at {at} s (frame {}): {}", self.frames - 1, path.display()),
+                    Err(e) => eprintln!("{e}"),
+                }
+            }
+        }
     }
 
     /// After the particles: --exit-after, and the warm-up a report leaves out.
@@ -3167,7 +3251,10 @@ impl App {
     fn ae_at_start(&self, now: f64) -> std::borrow::Cow<'_, NativeSettings> {
         let n = &self.drawn;
         let (delay, build) = (n.ae_start_delay.max(0.0), n.ae_build_up.max(0.0));
-        if n.ae_enabled == 0.0 || now >= delay + build {
+        // The start's own delay keeps AE off so the XMB start from black shows the scene's true brightness - but the
+        // benchmark's scene is not the start, so it runs AE at full strength whenever it plays (early at first start, or
+        // later from the panel), rather than bright at first start and dim later.
+        if n.ae_enabled == 0.0 || self.bench_shown || now >= delay + build {
             return std::borrow::Cow::Borrowed(n);
         }
         let mut s = n.clone();
@@ -3256,6 +3343,18 @@ impl App {
         self.options.shots.drain(..due).collect()
     }
 
+    /// The wave-mesh dumps due by now, soonest first.
+    fn due_dumps(&mut self, now: f64) -> Vec<(f64, std::path::PathBuf)> {
+        let due = self.options.dump_wave.iter().take_while(|(at, _)| now >= *at).count();
+        self.options.dump_wave.drain(..due).collect()
+    }
+
+    /// The particle-pool dumps due by now, soonest first.
+    fn due_particle_dumps(&mut self, now: f64) -> Vec<(f64, std::path::PathBuf)> {
+        let due = self.options.dump_particles.iter().take_while(|(at, _)| now >= *at).count();
+        self.options.dump_particles.drain(..due).collect()
+    }
+
     /// The settings window's background, from the scene's capture: its part of the scene, as GL counts it, when the
     /// window shows the scene, lies over the scene window on the screen, and the blur is on.
     fn window_source(&self, scene: &Window, window: &Window, size: winit::dpi::PhysicalSize<u32>) -> Option<[f32; 4]> {
@@ -3305,7 +3404,7 @@ impl App {
         gfx.perf.gpu_end();
         gfx.perf.lap(Stage::WaveDraw);
 
-        self.run_particles(&gfx.window, f);
+        self.run_particles(&gfx.window, f, None);
         gfx.perf.lap(Stage::ParticleSim);
         gfx.perf.gpu_begin(Pass::Particles);
         g.particles.draw(gl, &self.sim.particles, &self.scene.iridescent_palette, width, height, f.gamma);
@@ -3393,6 +3492,13 @@ impl App {
                 Err(e) => eprintln!("shot {}: {e}", path.display()),
             }
         }
+        // Wave-mesh dumps (OpenGL always builds the wave on the CPU).
+        for (at, path) in self.due_dumps(now) {
+            match dump_wave_mesh(&self.sim.wave.mesh, &path) {
+                Ok(()) => println!("wave dump at {at} s (frame {}, CPU): {}", self.frames - 1, path.display()),
+                Err(e) => eprintln!("{e}"),
+            }
+        }
         let ae = (ae_on && gfx.perf.detailed()).then(|| g.spline.auto_exposure(gl));
         let info = self.overlay_info(width, height, &gfx.perf, ae).map(|mut i| {
             i.graphics = gfx.api.clone();
@@ -3452,8 +3558,19 @@ impl App {
             (_, true, true) => "spline mesh on GPU (f64)",
             (_, true, false) => "spline mesh on GPU (f32)",
         };
-        if !gfx.api.ends_with(wave_at) {
-            gfx.api = format!("{} · {wave_at}", gfx.api_base);
+        // particles.elf's update task on the GPU (gpuParticles), as the Resources tab asks; `NAGARE_FAIL=gpuparticles`
+        // forces it back to the CPU, the gpuWave analog, so the fallback can be tested.
+        let gpu_particles = self.drawn.gpu_particles != 0.0 && !forced_failure("gpuparticles");
+        let particle_at = if self.drawn.gpu_particles != 0.0 && forced_failure("gpuparticles") {
+            " · particles on CPU (forced)"
+        } else if gpu_particles {
+            " · particles on GPU"
+        } else {
+            ""
+        };
+        let api_at = format!("{wave_at}{particle_at}");
+        if !gfx.api.ends_with(&api_at) {
+            gfx.api = format!("{} · {api_at}", gfx.api_base);
         }
         // `lostonce` loses the first device only, so that the renderer's return can be tried.
         let lost_once = || forced_failure("lostonce") && !LOST_ONCE.swap(true, std::sync::atomic::Ordering::Relaxed);
@@ -3469,10 +3586,12 @@ impl App {
         vk.draw_scene(&self.sim, gpu_wave, &self.wave_settings, dt, &f.moment, f.gamma, &self.ae_at_start(f.now));
         gfx.perf.lap(Stage::WaveDraw);
 
-        self.run_particles(&gfx.window, f);
+        // The particle update task on the GPU (gpuParticles), or the CPU. Built per frame over vk's backend.
+        let mut particle_task = gpu_particles.then(|| vk.particle_task()).flatten();
+        self.run_particles(&gfx.window, f, particle_task.as_mut().map(|t| t as &mut dyn particles_sim::GpuTask));
         gfx.perf.lap(Stage::ParticleSim);
         vk.gpu_begin(Pass::Particles);
-        vk.draw_particles(&self.sim.particles, &self.scene.iridescent_palette, f.gamma);
+        vk.draw_particles(&self.sim.particles, &self.scene.iridescent_palette, f.gamma, gpu_particles);
         vk.gpu_end();
         gfx.perf.lap(Stage::ParticleDraw);
         self.sail(f);
@@ -3544,6 +3663,17 @@ impl App {
                 let _ = std::fs::copy(&shots[0].1, path);
             }
             println!("shot at {at} s (frame {}): {}", self.frames - 1, path.display());
+        }
+        // Wave-mesh dumps: the GPU's mesh, read back, when gpuWave built it this frame; otherwise the CPU's.
+        for (at, path) in self.due_dumps(now) {
+            let (mesh, src) = match vk.wave_mesh_gpu() {
+                Some(m) => (m, "GPU"),
+                None => (self.sim.wave.mesh.clone(), "CPU"),
+            };
+            match dump_wave_mesh(&mesh, &path) {
+                Ok(()) => println!("wave dump at {at} s (frame {}, {src}): {}", self.frames - 1, path.display()),
+                Err(e) => eprintln!("{e}"),
+            }
         }
         gfx.perf.lap(Stage::Present);
 
@@ -4106,6 +4236,8 @@ fn main() {
         sets: Vec::new(),
         sets_at: Vec::new(),
         shots: Vec::new(),
+        dump_wave: Vec::new(),
+        dump_particles: Vec::new(),
         exit_after: None,
         report: None,
         warmup: 1.0,
@@ -4177,6 +4309,26 @@ fn main() {
             }) {
                 Some(shot) => {
                     options.shots.push(shot);
+                    true
+                }
+                None => false,
+            },
+            "--dump-wave" => match args.next().and_then(|s| {
+                let (at, path) = s.split_once('=')?;
+                Some((seconds(Some(at.to_string()))?, std::path::PathBuf::from(path)))
+            }) {
+                Some(dump) => {
+                    options.dump_wave.push(dump);
+                    true
+                }
+                None => false,
+            },
+            "--dump-particles" => match args.next().and_then(|s| {
+                let (at, path) = s.split_once('=')?;
+                Some((seconds(Some(at.to_string()))?, std::path::PathBuf::from(path)))
+            }) {
+                Some(dump) => {
+                    options.dump_particles.push(dump);
                     true
                 }
                 None => false,
@@ -4293,6 +4445,8 @@ fn main() {
         }
     }
     options.shots.sort_by(|a, b| a.0.total_cmp(&b.0));
+    options.dump_wave.sort_by(|a, b| a.0.total_cmp(&b.0));
+    options.dump_particles.sort_by(|a, b| a.0.total_cmp(&b.0));
     options.sets_at.sort_by(|a, b| a.0.total_cmp(&b.0));
     // One Nagare per config: a second one asks the first to show its settings, and goes (single.rs). A test reads no
     // config, and runs beside anything.

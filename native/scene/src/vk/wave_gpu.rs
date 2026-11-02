@@ -202,7 +202,7 @@ impl WaveGpu {
         let received = buffer("received", N * N * 16, U::STORAGE | U::COPY_DST);
         let inputs = buffer("inputs", INPUTS * real, U::STORAGE | U::COPY_DST);
         let control = buffer("control", N * N * 16, U::STORAGE);
-        let mesh = buffer("mesh", wave::VERTICES * wave::RECORD * 4, U::STORAGE | U::VERTEX);
+        let mesh = buffer("mesh", wave::VERTICES * wave::RECORD * 4, U::STORAGE | U::VERTEX | U::COPY_SRC);
         let group = d.create_bind_group(&wgpu::BindGroupDescriptor {
             label: Some("wave surface"),
             layout: &layout,
@@ -252,6 +252,31 @@ impl WaveGpu {
             pass.set_bind_group(0, &self.group, &[]);
             pass.dispatch_workgroups(threads.div_ceil(64) as u32, 1, 1);
         }
+    }
+
+    /// Reads the GPU-built mesh back into a flat `f32` array (`VERTICES * RECORD`, position then normal per vertex), for
+    /// the raw CPU-vs-GPU comparison (`--dump-wave`). Blocks on the GPU - only called from the test dump, never in a
+    /// drawn frame. Returns an empty vector if the readback fails.
+    pub fn read_mesh(&self, gpu: &Gpu) -> Vec<f32> {
+        let size = (wave::VERTICES * wave::RECORD * 4) as u64;
+        let staging = gpu.device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("wave mesh readback"),
+            size,
+            usage: wgpu::BufferUsages::MAP_READ | wgpu::BufferUsages::COPY_DST,
+            mapped_at_creation: false,
+        });
+        let mut encoder = gpu.device.create_command_encoder(&wgpu::CommandEncoderDescriptor { label: Some("wave mesh readback") });
+        encoder.copy_buffer_to_buffer(&self.mesh, 0, &staging, 0, size);
+        gpu.queue.submit(Some(encoder.finish()));
+        let slice = staging.slice(..);
+        slice.map_async(wgpu::MapMode::Read, |_| {});
+        let _ = gpu.device.poll(wgpu::PollType::wait_indefinitely());
+        let out = match slice.get_mapped_range() {
+            Ok(data) => data.as_chunks::<4>().0.iter().map(|c| f32::from_le_bytes(*c)).collect(),
+            Err(_) => Vec::new(),
+        };
+        staging.unmap();
+        out
     }
 }
 

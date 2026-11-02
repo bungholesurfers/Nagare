@@ -9,6 +9,12 @@ Sony's names are used only to say what it recreates. The executable is `nagare.e
 starts as a live desktop wallpaper, behind the icons, with a tray icon to control it; elsewhere, and with `--window`,
 it is a window.
 
+The scene renderer - the wave, the particles, the backdrop, the passes after the wave, and the enhancements - lives in a
+library crate, `nagare-scene` (`scene/`), so other front-ends can draw the same scene; this crate (`src/`) is its
+wallpaper front-end and re-exports the library's modules, so its `crate::wave`, `crate::settings`, ... keep resolving.
+`native/` is a Cargo workspace of the two (`xtask` stays outside it). A change to shared rendering code is gated by the
+byte-for-byte regression shots - see [docs/testing.md](docs/testing.md).
+
 ```bash
 cargo run --release                          # behind the desktop icons (Windows), with a tray icon
 cargo run --release -- --window              # a window, with the settings panel
@@ -221,6 +227,19 @@ The panel shows the path, the home folder written as `%APPDATA%` or `~`, and **S
 browser. Not saved: the time override, the perf overlay's level and the panel's visibility, which the command line
 sets. Saved besides the panel's values: the frame cap and the Resources tab's list of programs.
 
+## Live state channel
+
+Nagare publishes a small snapshot of what it is showing and doing to a memory-mapped file next to the config
+(`%APPDATA%\Nagare\state.v1.bin`), rewritten every frame, so other programs can read it and react — without
+impersonating Nagare or reaching into it. It carries the appearance (theme, brightness/colour, video, palette, Season
+Pass) and the live moment (the scene clock, fade, gamma, how loud the music is and the beat, whether Nagare-maru is
+sailing). aegis-nagare reads it to continue near the running Nagare on the lock screen; a shell mod could read it to
+drive the taskbar. It is file-backed shared memory, so any program can read it with no privileges and across sessions;
+a reader never sees a torn write (a seqlock), judges staleness from the record's own timestamp, and treats the bytes as
+untrusted (fixed, versioned, validated). The record layout and a reader are documented in
+[`docs/state-channel.md`](docs/state-channel.md); `scene/src/state.rs` is the codec and `src/state_publish.rs` writes
+it. Off with the `stateChannel` config key (default on); never written under `--test`.
+
 ## The panel's top
 
 At the very top, the app's name, what it is, its home on GitHub (github.com/bungholesurfers/Nagare), and whose research
@@ -243,8 +262,11 @@ music hold; **Override the time**, a month, day and time of day the clock is hel
 
 The cap is on at 60 by default, and 6 at the least; the config keeps it, or 0 for none. Without one each frame waits for
 the display's next refresh (swap interval 1). With a cap that divides the
-refresh rate, such as 60 on a 240 Hz display, each frame waits for that many refreshes (swap interval 4), so every
-frame lasts exactly as long. Any other cap is kept by a timer with vsync off: a deadline one period after the last,
+refresh rate, such as 60 on a 240 Hz display, each frame is paced on the CPU to a deadline one period apart and shown at
+the next ordinary every-refresh vsync (swap interval 1), so every frame lasts exactly as long. Drivers widely ignore
+swap intervals above 1 (OpenGL's old `Wait(4)`), especially on a high-refresh display under the compositor, which left
+the rate at the cap over 0.9 - 66 fps for a 60 fps cap on 240 Hz; dividing on the CPU avoids that. Any other cap is kept
+by a timer with vsync off: a deadline one period after the last,
 slept towards and spun for its last 0.8 ms: std's sleep on Windows is a high-resolution waitable timer, which woke at
 most about 0.6 ms late here whatever the system timer resolution (measured with it at 15.6 ms, 2026-10-28), so raising
 the resolution (`timeBeginPeriod`) would buy nothing but more wake-ups system-wide; the spin was 1.5 ms, from 2 ms out.
@@ -772,7 +794,7 @@ start, and Show it now at once; a `--test` run counts as a later start):
 - *Before the start* (the default): on black, before anything else is seen, 0.3 s in; as it begins to fade out, the
   XMB's start plays from its beginning - the sequence let go for a frame and started again, so that the wave's lines,
   the particles and the backdrop, eased in from black, each begin it as at the app's start.
-- *After the XMB's start*: `epilepsyWarningAfterSec` (5 s) into it, about half a second after the particles come in,
+- *After the XMB's start*: `epilepsyWarningAfterSec` (7 s) into it, about half a second after the particles come in,
   over the scene, which is blurred behind it (`epilepsyWarningBlurPx`, the panel's blur laid over the whole screen, its radius growing and shrinking with the fade),
   the blur fading in and out with the text.
 
@@ -1045,6 +1067,10 @@ nagare --test --set-at 3:renderer=1 --shot 5=v.png --exit-after 6  # switching t
 For CPU costs, pace the run (`--fps 60` or a divisor of the refresh rate): unpaced, the driver's thread competes with
 the main thread for the CPU and the numbers wander.
 
+For the pixel-for-pixel regression net - `cargo xtask shots DIR` draws a matrix of renderer and scene-state runs and
+`cargo xtask compare OLD NEW` holds them to the byte, the gate on any change to shared rendering code - and for what it
+does and does not catch and how to add a case, see [docs/testing.md](docs/testing.md).
+
 ### Build and PGO
 
 The release profile is for working on Nagare: no LTO, 16 codegen units and incremental compilation. Rebuilding after
@@ -1085,8 +1111,9 @@ The build tasks are a small Rust program, `xtask/` (standard library only), whic
 | `cargo xtask check` | what CI checks: clippy for Windows, Linux and macOS, warnings as errors, then the tests |
 | `cargo xtask pgo` | the whole PGO pass above, about 20 minutes; or step by step: `pgo-instrument`, `pgo-train [SECONDS]`, `pgo-merge`, `pgo-build` |
 | `cargo xtask installer [--no-build] [--install]` | the installer, from a fresh build or (`--no-build`) the exes already built; `--install` installs it silently |
-| `cargo xtask shots DIR [--exe EXE] [-- ARGS...]` | the regression shots: OpenGL, Vulkan, Vulkan supersampled and OpenGL without the enhancements, at 6 s and 25 s |
+| `cargo xtask shots DIR [--exe EXE] [-- ARGS...]` | the regression shots across the renderer/scene matrix (OpenGL, Vulkan and Vulkan supersampled, plus the day, music, Season Pass and disco variants), at 6 s and 25 s |
 | `cargo xtask compare DIR1 DIR2` | two shots folders compared byte for byte |
+| `cargo xtask wavediff [--particles] [A B]` | CPU vs GPU as raw data: the wave mesh (`gpuWave`), or with `--particles` the particle pool (`gpuParticles`); with no files runs both under Vulkan and reports the difference; with two dump files diffs those |
 | `cargo xtask ready` | everything before a commit: `check`, `pgo`, then `installer --no-build --install` |
 
 A Nagare running from `target\release` would lock its exe against the build; the tasks move such an exe aside (to
@@ -1103,41 +1130,43 @@ source of truth: the constants, and the comments naming their firmware addresses
 
 | Rust                       | Page                                                         |
 | -------------------------- | ------------------------------------------------------------ |
-| `src/wave.rs`              | `wave-reverse.js`                                            |
-| `src/spline.rs`            | `spline.js`                                                  |
-| `src/backdrop.rs`          | `backdrop.js` (Auto only; the old gradient presets are left out) |
-| `src/months.rs`            | `background-months.js` (generated from it)                   |
-| `src/postprocess.rs`       | `postprocess.js`                                             |
-| `src/particles_sim.rs`     | `particles-reverse.js`                                       |
-| `src/particles.rs`         | `particles.js`                                               |
-| `src/scene.rs`             | `scene-themes.js`                                            |
-| `src/settings.rs`          | `spline-settings.js`, `particles-settings.js`                |
-| `src/input.rs`             | `xmb-input.js`                                               |
+| `scene/src/wave.rs`        | `wave-reverse.js`                                            |
+| `scene/src/spline.rs`      | `spline.js`                                                  |
+| `scene/src/backdrop.rs`    | `backdrop.js` (Auto only; the old gradient presets are left out) |
+| `scene/src/months.rs`      | `background-months.js` (generated from it)                   |
+| `scene/src/postprocess.rs` | `postprocess.js`                                             |
+| `scene/src/particles_sim.rs` | `particles-reverse.js`                                       |
+| `scene/src/particles.rs`   | `particles.js`                                               |
+| `scene/src/scene.rs`       | `scene-themes.js`                                            |
+| `scene/src/settings.rs`    | `spline-settings.js`, `particles-settings.js`                |
+| `scene/src/input.rs`       | `xmb-input.js`                                               |
 | `src/panel.rs`             | `settings-panels.js`, and the app's own controls at its top  |
 | `src/main.rs`              | `index.html`                                                 |
-| `src/auto_exposure.rs`     | the app's own: auto exposure                                 |
+| `scene/src/auto_exposure.rs` | the app's own: auto exposure                                 |
 | `src/config.rs`            | the app's own: the config file                               |
-| `src/perf.rs`              | the app's own: the perf overlay                              |
-| `src/steamboat.rs`         | the app's own: the perf overlay's steamboat, the music drawn   |
-| `src/maru.rs`              | the app's own: maru-chan, the 3D boat on the wave             |
-| `src/disco.rs`             | the app's own: the disco ball, heavy bass brings it down      |
-| `src/warning.rs`           | the app's own: the photosensitive epilepsy warning            |
-| `src/intro.rs`             | the app's own: the first start's benchmark screen and card    |
+| `scene/src/state.rs`       | the app's own: the live state channel's record + seqlock codec |
+| `src/state_publish.rs`     | the app's own: publishes the live state to its memory-mapped file |
+| `scene/src/perf.rs`        | the app's own: the perf overlay                              |
+| `scene/src/steamboat.rs`   | the app's own: the perf overlay's steamboat, the music drawn   |
+| `scene/src/maru.rs`        | the app's own: maru-chan, the 3D boat on the wave             |
+| `scene/src/disco.rs`       | the app's own: the disco ball, heavy bass brings it down      |
+| `scene/src/warning.rs`     | the app's own: the photosensitive epilepsy warning            |
+| `scene/src/intro.rs`       | the app's own: the first start's benchmark screen and card    |
 | `src/machine.rs`           | the app's own: the drivers seen and the benchmark's result    |
-| `src/antialias.rs`         | the app's own: FXAA, and supersampling under Vulkan           |
-| `src/sharpen.rs`           | the app's own: sharpening (CAS) over the finished frame    |
+| `scene/src/antialias.rs`   | the app's own: FXAA, and supersampling under Vulkan           |
+| `scene/src/sharpen.rs`     | the app's own: sharpening (CAS) over the finished frame    |
 | `src/wallpaper.rs`         | the desktop embedding (Windows only)                         |
 | `src/tray.rs`              | the tray icon (Windows only)                                 |
 | `src/autostart.rs`         | the app's own: Start with Windows, for an installed copy     |
 | `src/settings_window.rs`   | the app's own: the settings in a window of their own         |
 | `src/media.rs`             | the app's own: the system's media sessions, for autoMusic    |
-| `src/audio.rs`             | the app's own: listening to the output in the music scene    |
+| `scene/src/audio.rs`       | the app's own: listening to the output in the music scene    |
 | `src/presence.rs`          | the app's own: the session locked or the display off (Windows only) |
 | `src/neighbour.rs`         | the app's own: other programs' conditions (Windows only)     |
-| `src/cpu.rs`               | the app's own: where the threads run, and what each costs    |
-| `src/blur.rs`              | the app's own: the settings' blurred background              |
-| `src/sim.rs`               | `index.html`'s frame: the wave, its fade and the particles, whichever API draws |
-| `src/vk/`                  | the app's own: the Vulkan renderer (wgpu), below             |
+| `scene/src/cpu.rs`         | the app's own: where the threads run, and what each costs    |
+| `scene/src/blur.rs`        | the app's own: the settings' blurred background              |
+| `scene/src/sim.rs`         | `index.html`'s frame: the wave, its fade and the particles, whichever API draws |
+| `scene/src/vk/`            | the app's own: the Vulkan renderer (wgpu), below             |
 | `src/logo.rs`              | the app's own: the logo's sizes, as `assets/logo` holds them |
 | `src/watchdog.rs`          | the app's own: starting the watchdog, and the crash log      |
 | `src/bin/watchdog.rs`      | `nagare-watchdog`, which starts the app again should it crash |

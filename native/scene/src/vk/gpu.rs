@@ -94,6 +94,9 @@ pub enum Geometry<'a> {
     Quad,
     Indexed { vertices: [&'a wgpu::Buffer; 2], indices: &'a wgpu::Buffer, count: u32 },
     Instanced { vertices: [&'a wgpu::Buffer; 2], instances: u32 },
+    /// Instanced strips whose instance count is on the GPU: `indirect` holds the draw args
+    /// (`[vertex_count, instance_count, first_vertex, first_instance]`), so the count never comes back to the CPU.
+    InstancedIndirect { vertices: [&'a wgpu::Buffer; 2], indirect: &'a wgpu::Buffer },
     /// A list of triangles, `count` corners from `first`.
     List { vertices: &'a wgpu::Buffer, first: u32, count: u32 },
 }
@@ -518,6 +521,11 @@ impl Gpu {
                 pass.set_vertex_buffer(0, vertices[0].slice(..));
                 pass.set_vertex_buffer(1, vertices[1].slice(..));
                 pass.draw(0..4, 0..*instances);
+            }
+            Geometry::InstancedIndirect { vertices, indirect } => {
+                pass.set_vertex_buffer(0, vertices[0].slice(..));
+                pass.set_vertex_buffer(1, vertices[1].slice(..));
+                pass.draw_indirect(indirect, 0);
             }
             Geometry::List { vertices, first, count } => {
                 pass.set_vertex_buffer(0, vertices.slice(..));

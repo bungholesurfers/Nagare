@@ -28,9 +28,14 @@ cargo xtask <task>, from native/:
                        package them with Inno Setup 6 into target/installer/nagare-setup-VERSION.exe, and with
                        --install install it silently over the installed copy (Windows)
   shots DIR [--exe EXE] [-- ARGS...]
-                       regression shots into DIR: OpenGL, Vulkan, Vulkan supersampled and OpenGL with the
-                       enhancements off, at 6 s and 25 s, each a --test run; ARGS go to every run
+                       regression shots into DIR across the renderer/scene matrix (OpenGL, Vulkan and Vulkan
+                       supersampled, plus the day, music, Season Pass and disco variants), at 6 s and 25 s,
+                       each a --test run; ARGS go to every run
   compare DIR1 DIR2    compare two shots folders byte for byte; fails if any shot differs
+  wavediff [--particles] [A B]
+                       compare what the CPU vs the GPU builds, as raw data: the wave mesh (gpuWave), or with
+                       --particles the particle pool (gpuParticles). No files: runs both under Vulkan and reports
+                       the difference; two dump files (from --dump-wave / --dump-particles): diffs those
   ready                everything before a commit: check, pgo, installer --no-build --install
   help                 this
 ";
@@ -52,11 +57,23 @@ const TRAINING: &[&[&str]] = &[
 ];
 
 /// The regression shots' runs: each renderer, and OpenGL with the enhancements off (the identity check's).
+// Each run draws the same seeded, fixed-clock scene (the loop adds --test, the date, the size and
+// maruAt) and takes two shots; compare() holds every run's PNGs byte-for-byte. The matrix covers,
+// in order: the renderers on the default night scene; the auto backdrop by day on each renderer;
+// the music theme's backdrop program; Season Pass on a fixed month; and the disco ball (dropped at
+// once by discoWithMusic, since --test has no audio, and lowered fast so it is down by the shots).
+// See docs/testing.md for what this does and does not catch, and how to add a scenario.
 const SHOT_RUNS: &[(&str, &[&str])] = &[
     ("gl", &["--renderer", "opengl"]),
     ("vk", &["--renderer", "vulkan"]),
     ("vkss", &["--renderer", "vulkan", "--set", "supersample=2"]),
     ("glid", &["--renderer", "opengl", "--set", "antiAlias=0", "--set", "sharpen=0", "--set", "aeEnabled=0"]),
+    ("gl-day", &["--renderer", "opengl", "--test-date", "2007-06-15T10:00:00", "--set", "seasonPass=0"]),
+    ("vk-day", &["--renderer", "vulkan", "--test-date", "2007-06-15T10:00:00", "--set", "seasonPass=0"]),
+    ("vk-music", &["--renderer", "vulkan", "--set", "musicPlaying=1"]),
+    ("vk-season", &["--renderer", "vulkan", "--set", "startTransition=1", "--set", "seasonPass=1", "--set", "seasonPassStart=12"]),
+    ("gl-disco", &["--renderer", "opengl", "--set", "musicPlaying=1", "--set", "discoWithMusic=1", "--set", "discoRiseSec=2"]),
+    ("vk-disco", &["--renderer", "vulkan", "--set", "musicPlaying=1", "--set", "discoWithMusic=1", "--set", "discoRiseSec=2"]),
 ];
 
 type Result<T = ()> = std::result::Result<T, String>;
@@ -81,6 +98,7 @@ fn main() {
             [a, b] => compare(Path::new(a), Path::new(b)),
             _ => Err("usage: cargo xtask compare DIR1 DIR2".into()),
         },
+        Some("wavediff") => wavediff(&rest),
         Some("ready") => ready(),
         Some("help" | "--help" | "-h") | None => {
             print!("{USAGE}");
@@ -333,6 +351,9 @@ fn shots(args: &[&str]) -> Result {
             .args(*renderer)
             .args(extra)
             .args(["--set", "maruAt=0.4"])
+            // The particle sim stays on the CPU for the shots: the GPU path's quaternion orientation drifts (chaotic,
+            // visually equivalent), so it isn't byte-deterministic. gpuParticles is validated by `wavediff --particles`.
+            .args(["--set", "gpuParticles=0"])
             .args(["--shot", &format!("6={}", file("6.png")), "--shot", &format!("25={}", file("25.png"))])
             .args(["--report", &file("report.txt"), "--exit-after", "25.2"])
             .stdout(std::process::Stdio::null());
@@ -372,6 +393,79 @@ fn compare(a: &Path, b: &Path) -> Result {
     } else {
         Err(format!("{differ} of {} shots differ", names.len()))
     }
+}
+
+const WAVE_LABELS: [&str; 8] = ["pos.x", "pos.y", "pos.z", "pos.w", "nrm.x", "nrm.y", "nrm.z", "nrm.w"];
+const PARTICLE_LABELS: [&str; 12] = ["pos.x", "pos.y", "pos.z", "life", "vel.x", "vel.y", "vel.z", "aging", "q.x", "q.y", "q.z", "q.w"];
+
+/// Compares what the CPU builds against what the GPU builds, as raw data. Default: the wave mesh (`gpuWave`, 8 floats a
+/// vertex); with `--particles`, the particle pool (`gpuParticles`, 12 a slot). With two dump files (from `--dump-wave`
+/// / `--dump-particles`), diffs those; with none, runs Nagare twice under Vulkan - CPU then GPU, everything else
+/// identical - and diffs. The console's programs are deterministic, so the only difference is the GPU's precision (f64
+/// where it has it, else f32); the particle noise still matches, via the rank-based LCG jump.
+fn wavediff(args: &[&str]) -> Result {
+    let particles = args.contains(&"--particles");
+    let files: Vec<&str> = args.iter().copied().filter(|a| *a != "--particles").collect();
+    let (record, labels, set_key, dump_flag): (usize, &[&str], &str, &str) =
+        if particles { (12, &PARTICLE_LABELS, "gpuParticles", "--dump-particles") } else { (8, &WAVE_LABELS, "gpuWave", "--dump-wave") };
+    if let [a, b] = files.as_slice() {
+        return diff_dumps(Path::new(a), Path::new(b), record, labels);
+    }
+    if !files.is_empty() {
+        return Err("usage: cargo xtask wavediff [--particles] [FILE1 FILE2]".into());
+    }
+    let dir = native().join("target").join("wavediff");
+    std::fs::create_dir_all(&dir).map_err(|e| format!("{}: {e}", dir.display()))?;
+    let exe_path = exe(&native().join("target").join("release"), "nagare");
+    let kind = if particles { "particles" } else { "wave" };
+    let (cpu, gpu) = (dir.join(format!("{kind}-cpu.bin")), dir.join(format!("{kind}-gpu.bin")));
+    for (label, val, out) in [("CPU", "0", &cpu), ("GPU", "1", &gpu)] {
+        step(&format!("{kind} dump: {label}"));
+        let mut cmd = Command::new(&exe_path);
+        cmd.args(["--test", "--test-date", "2007-08-11T01:37:00", "--renderer", "vulkan", "--size", "960x540"])
+            .args(["--set", &format!("{set_key}={val}")])
+            .args([dump_flag, &format!("6={}", out.display())])
+            .args(["--exit-after", "6.2"])
+            .stdout(std::process::Stdio::null());
+        run(&mut cmd)?;
+    }
+    diff_dumps(&cpu, &gpu, record, labels)
+}
+
+/// Reads two raw-f32 dumps and reports how far apart they are: exact (bit-identical) count, mean and max absolute
+/// difference, and the worst float - which record and component (`record` floats each, named by `labels`).
+fn diff_dumps(a: &Path, b: &Path, record: usize, labels: &[&str]) -> Result {
+    let read = |p: &Path| -> Result<Vec<f32>> {
+        let bytes = std::fs::read(p).map_err(|e| format!("{}: {e}", p.display()))?;
+        if bytes.len() % 4 != 0 {
+            return Err(format!("{}: {} bytes, not a whole number of f32", p.display(), bytes.len()));
+        }
+        Ok(bytes.as_chunks::<4>().0.iter().map(|c| f32::from_le_bytes(*c)).collect())
+    };
+    let (x, y) = (read(a)?, read(b)?);
+    if x.len() != y.len() {
+        return Err(format!("different lengths: {} floats vs {}", x.len(), y.len()));
+    }
+    if x.is_empty() {
+        return Err("empty dumps (is the GPU path on and supported?)".into());
+    }
+    let (mut max, mut sum, mut worst, mut exact) = (0.0f64, 0.0f64, 0usize, 0usize);
+    for (i, (&p, &q)) in x.iter().zip(&y).enumerate() {
+        let d = (p as f64 - q as f64).abs();
+        sum += d;
+        if d > max {
+            (max, worst) = (d, i);
+        }
+        exact += usize::from(p.to_bits() == q.to_bits());
+    }
+    let n = x.len();
+    let component = labels.get(worst % record).copied().unwrap_or("?");
+    println!("{} vs {}", a.display(), b.display());
+    println!("  {n} floats ({} records x {record})", n / record);
+    println!("  exact (bit-identical): {exact}/{n} ({:.2}%)", 100.0 * exact as f64 / n as f64);
+    println!("  mean abs diff: {:.3e}", sum / n as f64);
+    println!("  max  abs diff: {max:.3e}  at record {} {component}  ({} vs {})", worst / record, x[worst], y[worst]);
+    Ok(())
 }
 
 fn ready() -> Result {

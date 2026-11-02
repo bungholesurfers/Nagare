@@ -4,7 +4,7 @@
 //! which a stop drops and a change of API makes again.
 
 use crate::input::Poll;
-use crate::particles_sim::{SimOptions, System};
+use crate::particles_sim::{GpuTask, SimOptions, System};
 use crate::scene::Sent;
 use crate::settings::{ParticleSettings, WaveSettings};
 use crate::wave::Wave;
@@ -138,12 +138,13 @@ impl Sim {
         width: i32,
         height: i32,
         fade: Option<&Sent>,
+        gpu: Option<&mut (dyn GpuTask + '_)>,
     ) {
         // An empty window has nothing to draw into; emitting then would put every particle on the axis.
         if width == 0 || height == 0 {
             return;
         }
-        self.particles.update(settings, opts, sequence, &mut self.wave, self.aspect, poll, time_sec, dt_sec, fade);
+        self.particles.update(settings, opts, sequence, &mut self.wave, self.aspect, poll, time_sec, dt_sec, fade, gpu);
     }
 
     /// The particles alive, and the steps the simulation has run.

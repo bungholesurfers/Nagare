@@ -63,8 +63,10 @@ impl Particles {
         p.f("uGamma", &[f(gamma)]);
     }
 
-    /// Draws `system` over `canvas`.
-    pub fn draw(&mut self, gpu: &Gpu, encoder: &mut wgpu::CommandEncoder, canvas: &Tex, system: &System, palette: &[u32], gamma: f64) {
+    /// Draws `system` over `canvas`. With `gpu_source` (the particle backend's `verts` and indirect-`args` buffers),
+    /// the instances and their count come from the GPU - no vertex upload, an indirect draw - for gpuParticles.
+    #[allow(clippy::too_many_arguments)]
+    pub fn draw(&mut self, gpu: &Gpu, encoder: &mut wgpu::CommandEncoder, canvas: &Tex, system: &System, palette: &[u32], gamma: f64, gpu_source: Option<(&wgpu::Buffer, &wgpu::Buffer)>) {
         let count = system.count;
         if count == 0 || canvas.width == 0 || canvas.height == 0 {
             return;
@@ -77,28 +79,31 @@ impl Particles {
             let size = IRIDESCENT_SIZE as u32;
             gpu.write(&self.iridescent.texture, size, size, wgpu::TextureFormat::Rgba8Unorm, &iridescent_texels(palette));
         }
-        // Grown with the pool, past the console's.
-        let bytes = (count * OUT_STRIDE * 4) as u64;
-        if self.instances.size() < bytes {
-            self.instances = gpu.device.create_buffer(&wgpu::BufferDescriptor {
-                label: Some("particles"),
-                size: bytes.next_power_of_two(),
-                usage: wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST,
-                mapped_at_creation: false,
-            });
+        // The CPU path uploads the vertex records; the GPU path draws straight from the backend's buffer.
+        if gpu_source.is_none() {
+            // Grown with the pool, past the console's.
+            let bytes = (count * OUT_STRIDE * 4) as u64;
+            if self.instances.size() < bytes {
+                self.instances = gpu.device.create_buffer(&wgpu::BufferDescriptor {
+                    label: Some("particles"),
+                    size: bytes.next_power_of_two(),
+                    usage: wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST,
+                    mapped_at_creation: false,
+                });
+            }
+            gpu.queue.write_buffer(&self.instances, 0, as_bytes(&system.output[..count * OUT_STRIDE]));
         }
-        gpu.queue.write_buffer(&self.instances, 0, as_bytes(&system.output[..count * OUT_STRIDE]));
         for &(dolly, _) in &subframes {
             let (mvp, model_view) = mvp(aspect, dolly);
             for pass in &self.passes {
                 let mut p = pass.params();
                 Self::set_uniforms(&mut p, &system.effective, system.color_fade.value * share, &mvp, &model_view, gamma, dolly);
                 let textures = [("uIridescent", &self.iridescent)];
-                let draw = Draw {
-                    blend: Blend::Add,
-                    geometry: Geometry::Instanced { vertices: [&self.corners, &self.instances], instances: count as u32 },
-                    ..Draw::quad(canvas.target(), &textures)
+                let geometry = match gpu_source {
+                    Some((verts, args)) => Geometry::InstancedIndirect { vertices: [&self.corners, verts], indirect: args },
+                    None => Geometry::Instanced { vertices: [&self.corners, &self.instances], instances: count as u32 },
                 };
+                let draw = Draw { blend: Blend::Add, geometry, ..Draw::quad(canvas.target(), &textures) };
                 gpu.draw(encoder, pass, &p, &draw);
             }
         }

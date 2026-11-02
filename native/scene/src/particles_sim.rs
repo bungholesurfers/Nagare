@@ -387,6 +387,54 @@ pub struct Stats {
     pub event_factor: f64,
 }
 
+/// What a GPU particle backend needs for one update step: the pool to upload (already emitted into - read only; the
+/// backend updates its own copy on the GPU), the flow grid, this frame's parameters, and each slot's rank among the
+/// live slots (`-1` if free). The GPU writes the pool, the vertex records and the indirect draw count on its side;
+/// nothing is read back here. Values are the console task's, in f64; the backend lays them out for its shader. Defined
+/// here so the simulation stays independent of either renderer; `scene/src/vk/particles_gpu.rs` implements it.
+pub struct GpuFrame<'a> {
+    pub pool: &'a [f32],
+    pub capacity: usize,
+    pub ranks: &'a [i32],
+    /// The slots emit filled this step (to upload sparsely to the GPU-resident pool). Ignored when `full`.
+    pub emitted: &'a [usize],
+    /// Upload the whole pool this step (first step, after a reset or a resize), rather than just `emitted`.
+    pub full: bool,
+    pub grid: &'a [i8],
+    pub seeds: [u32; 3],
+    pub force: [f64; 3],
+    pub drag: [f64; 3],
+    pub field_centre: [f64; 3],
+    pub noise_offset: [f64; 3],
+    pub dt: [f64; 4],
+    pub bounds_min: [f64; 3],
+    pub bounds_max: [f64; 3],
+    pub to_grid: [f64; 16],
+    pub from_grid: [f64; 16],
+    pub field_rot: [f64; 9],
+    pub flow_strength: f64,
+    pub noise_scale: f64,
+    pub spin_k: f64,
+}
+
+/// A backend that runs `particles.elf`'s per-particle update off the CPU (the GPU). The CPU still emits, keeps the free
+/// list and the controller RNG, and reclaims freed slots - the hybrid split. The readback is asynchronous:
+/// `sync_pool` (called before emit) writes the *previous* dispatch's result into the pool, so no step waits on the GPU
+/// in the steady one-step-per-frame case; `run` (after emit) dispatches and kicks the next readback.
+pub trait GpuTask {
+    /// Syncs the previous dispatch's **life column** into `pool` (offset 3 of each slot), from a compact async
+    /// readback - enough for the free list and the ranks. No-op on the first step; waits only when a same-frame step
+    /// hasn't left the GPU a gap.
+    fn sync_pool(&mut self, pool: &mut [f32]);
+    /// Reads the whole GPU-resident pool into `pool` (position, velocity, quaternion and all). For `--dump-particles`
+    /// only; it waits on the GPU.
+    fn read_full(&mut self, pool: &mut [f32]);
+    /// Uploads this step's pool changes (just `frame.emitted`, or the whole pool when `frame.full`) and the parameters,
+    /// dispatches the update over the GPU-resident pool, and kicks the compact async life readback. The GPU writes the
+    /// pool, the vertex records and the indirect draw count.
+    fn run(&mut self, frame: GpuFrame);
+}
+
 pub struct System {
     rng: QglRandom,
     capacity: usize,
@@ -397,6 +445,11 @@ pub struct System {
     params: Params,
     field_rot: [f32; 9],
     noise: [u32; 3],
+    /// The GPU path's live set from the last dispatch, so the next step can reclaim the slots it freed (the readback is
+    /// a step behind). Empty on the CPU path.
+    gpu_ranks: Vec<i32>,
+    /// The slots emit filled this step, for the GPU path's sparse upload. Cleared at the start of each emit.
+    emitted: Vec<usize>,
     model: Model,
     shake_cum: [f64; SENSOR_RING],
     icons: Icons,
@@ -481,6 +534,8 @@ impl System {
             params: Params::new(),
             field_rot: [0.0; 9],
             noise: [0; 3],
+            gpu_ranks: Vec::new(),
+            emitted: Vec::new(),
             model: Model {
                 dpad_axis: [0.0; 3],
                 dpad_vel: 0.0,
@@ -515,7 +570,84 @@ impl System {
     }
 
     // --- Verified: the update task (0x6ed0), one call per frame over the whole pool ---------------------------------
-    fn run_task(&mut self) {
+    /// Runs the per-particle update task: on the GPU if a backend is given (the hybrid path), else on the CPU.
+    fn run_task(&mut self, gpu: Option<&mut (dyn GpuTask + '_)>) {
+        match gpu {
+            Some(backend) => self.run_task_gpu(backend),
+            None => self.run_task_cpu(),
+        }
+    }
+
+    /// The GPU path: compute each live slot's rank (for the noise), hand the pool and this frame's parameters to the
+    /// backend, then reclaim the slots it freed - in ascending slot order, as `run_task_cpu` does, so the free list and
+    /// a later emission match the CPU exactly. Only the per-particle math differs (f64 on the GPU, ~ULP from the CPU).
+    fn run_task_gpu(&mut self, gpu: &mut (dyn GpuTask + '_)) {
+        rotation_to_mat3(&self.params.field_rotation, &mut self.field_rot);
+        let mut ranks = vec![-1i32; self.capacity];
+        let mut k = 0i32;
+        for s in 0..self.capacity {
+            if self.pool[s * STRIDE + 3] != FREE {
+                ranks[s] = k;
+                k += 1;
+            }
+        }
+        let a3 = |v: &[f32]| [v[0] as f64, v[1] as f64, v[2] as f64];
+        let a16 = |v: &[f32; 16]| std::array::from_fn(|i| v[i] as f64);
+        let field_rot: [f64; 9] = std::array::from_fn(|i| self.field_rot[i] as f64);
+        let p = &self.params;
+        let (force, drag, field_centre, noise_offset) = (a3(&p.force), a3(&p.drag), a3(&p.field_centre), a3(&p.noise_offset));
+        let dt = [p.dt[0] as f64, p.dt[1] as f64, p.dt[2] as f64, p.dt[3] as f64];
+        let (bounds_min, bounds_max) = (a3(&p.bounds_min), a3(&p.bounds_max));
+        let (to_grid, from_grid) = (a16(&p.to_grid), a16(&p.from_grid));
+        let (flow_strength, noise_scale, spin_k) = (p.flow_strength, p.noise_scale, 0.5 * p.spin_rate / 60.0);
+        // Full upload on the first step, or after a reset/resize (when there's no prior live set); otherwise the GPU
+        // pool is resident and only the slots emit just filled are uploaded.
+        let full = self.gpu_ranks.is_empty();
+        gpu.run(GpuFrame {
+            pool: &self.pool,
+            capacity: self.capacity,
+            ranks: &ranks,
+            emitted: &self.emitted,
+            full,
+            grid: &self.params.grid,
+            seeds: NOISE_SEEDS,
+            force,
+            drag,
+            field_centre,
+            noise_offset,
+            dt,
+            bounds_min,
+            bounds_max,
+            to_grid,
+            from_grid,
+            field_rot,
+            flow_strength,
+            noise_scale,
+            spin_k,
+        });
+        // The dispatch's result (deaths) comes back next step; remember this step's live set so `gpu_reclaim` can push
+        // the slots it freed, in ascending order, as `run_task_cpu` does. `count` (overlay) is the pre-update live set.
+        self.count = k as usize;
+        self.gpu_ranks.clear();
+        self.gpu_ranks.extend_from_slice(&ranks);
+    }
+
+    /// Reclaims the slots the previous GPU dispatch freed (life now FREE where the slot was live at that dispatch),
+    /// pushed ascending so the free list matches the CPU path. Called after `sync_pool`, before emit.
+    fn gpu_reclaim(&mut self) {
+        for s in 0..self.gpu_ranks.len().min(self.capacity) {
+            if self.gpu_ranks[s] >= 0 && self.pool[s * STRIDE + 3] == FREE {
+                self.free_list.push(s);
+                self.stats.died += 1;
+                self.gpu_ranks[s] = -1;
+            }
+        }
+    }
+
+    fn run_task_cpu(&mut self) {
+        // Drop any prior GPU live set so that, if the knob (or NAGARE_FAIL) switches back to the GPU, the next GPU step
+        // re-uploads the whole pool rather than a sparse patch onto a pool the CPU has since moved.
+        self.gpu_ranks.clear();
         self.noise = NOISE_SEEDS;
         let p = &self.params;
         rotation_to_mat3(&p.field_rotation, &mut self.field_rot);
@@ -1008,10 +1140,12 @@ impl System {
         let o = slot * STRIDE;
         let rec = [wa[0], wa[1], wa[2], 0.0, (ux * speed) as f32, (uy * speed) as f32, (uz * speed) as f32, aging as f32];
         self.pool[o..o + 8].copy_from_slice(&rec);
+        self.emitted.push(slot);
         self.stats.emitted += 1;
     }
 
     fn emit(&mut self, s: &ParticleSettings, mesh: &mut Wave) {
+        self.emitted.clear();
         self.emission.picked.clear();
         self.pick_vertices(s);
         self.sweep();
@@ -1082,6 +1216,17 @@ impl System {
     /// Grows or shrinks the pool to `capacity` slots - the native app's own, past the console's 2049. Grown, the new
     /// slots come free with an orientation of their own, as the first ones did, and the emitter fills them; shrunk,
     /// the pool comes up empty, as at the XMB's start, and fills again.
+    /// The pool, slot-indexed (`capacity * STRIDE` floats: position + life, velocity + aging, quaternion). For the raw
+    /// CPU-vs-GPU comparison (`--dump-particles`), which keys on it rather than the draw order.
+    pub fn pool(&self) -> &[f32] {
+        &self.pool
+    }
+
+    /// The pool, mutable - for folding in a pending GPU readback before a `--dump-particles` snapshot.
+    pub fn pool_mut(&mut self) -> &mut [f32] {
+        &mut self.pool
+    }
+
     pub fn set_capacity(&mut self, capacity: usize) {
         let capacity = capacity.max(1);
         if capacity == self.capacity {
@@ -1111,6 +1256,9 @@ impl System {
             self.rebuild_pool();
         }
         self.output.resize(capacity * OUT_STRIDE, 0.0);
+        // The GPU backend reallocates on a size change (losing its resident pool, which the next full upload restores);
+        // drop the stale live set so the next step doesn't reclaim against the old layout.
+        self.gpu_ranks.clear();
     }
 
     /// The XMB's start builds the scene again: its pool comes up empty, with every orientation the identity (0x5ef0c,
@@ -1128,11 +1276,12 @@ impl System {
         self.emission.due.clear();
         self.emission.sweep_left = 0;
         self.count = 0;
+        self.gpu_ranks.clear();
     }
 
     /// The parameters with the factors as they stand, then the block, decaying the grid, then the icons' wind on top
     /// of it and the pointer's, and the fades move on last.
-    fn step(&mut self, settings: &ParticleSettings, opts: &SimOptions, ev: &FrameInput, mesh: &mut Wave) {
+    fn step(&mut self, settings: &ParticleSettings, opts: &SimOptions, ev: &FrameInput, mesh: &mut Wave, mut gpu: Option<&mut (dyn GpuTask + '_)>) {
         let mut s = ParticleSettings::default();
         apply_spe(settings, self.spe.value, opts.video_height, &mut s);
         // The page's own: up and down weigh in the turn as left and right do, where the console's 0 leaves them none.
@@ -1142,8 +1291,13 @@ impl System {
         self.build_params(&s, opts, ev);
         self.move_icons(&s, opts, ev.step);
         self.pointer_wind(&s, ev.pointer);
+        if let Some(g) = gpu.as_deref_mut() {
+            // GPU path: fold in the previous dispatch's result and reclaim its deaths before emitting into free slots.
+            g.sync_pool(&mut self.pool);
+            self.gpu_reclaim();
+        }
         self.emit(&s, mesh);
-        self.run_task();
+        self.run_task(gpu);
         self.spe_advance();
         self.color_advance();
         self.effective = s;
@@ -1208,6 +1362,7 @@ impl System {
         time_sec: f64,
         dt_sec: f64,
         fade: Option<&Sent>,
+        mut gpu: Option<&mut (dyn GpuTask + '_)>,
     ) {
         self.spe_event(if opts.whats_new_open { 1.0 } else { 0.0 });
         self.color_event(fade);
@@ -1237,8 +1392,9 @@ impl System {
             self.warm = true;
             if self.sequence != "coldboot" {
                 let none = FrameInput::default();
+                // The one-time prewarm runs on the CPU: 300 steps of GPU round-trips would stall the first frame.
                 for _ in 0..PREWARM_STEPS {
-                    self.step(settings, opts, &none, mesh);
+                    self.step(settings, opts, &none, mesh, None);
                 }
             }
         }
@@ -1248,7 +1404,7 @@ impl System {
             self.step_carry -= 1.0;
             self.frame_input.step = self.next_step();
             let ev = self.frame_input.clone();
-            self.step(settings, opts, &ev, mesh);
+            self.step(settings, opts, &ev, mesh, gpu.as_deref_mut());
         }
 
         let wave = self.wave.as_mut().unwrap();
