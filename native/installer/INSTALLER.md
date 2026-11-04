@@ -73,7 +73,7 @@ any number of sizes, and picks the one that best fits the screen's DPI, so keep 
 own pictures** in the Installer tab, so that its Render writes only `theme.json` and `theme.iss`. Or keep the tab's
 compositing and replace just `scene-tall.png` and `scene-wide.png`: Render cuts them to size and puts the box on.
 With **welcome picture transparent**, `wizard-*.png` holds the logo alone, at the box's size and height, over the
-page's own colour.
+page's own colour - or, with **the installer icon in place of the logo** under it, the Installer icon tab's box alone.
 
 The tab's knobs, and the directives they write:
 

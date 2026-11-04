@@ -162,6 +162,29 @@ cargo xtask wavediff --particles cpu.bin gpu.bin
 Expect the usual ~3e-7 on the quaternion alone. The phantom bug read as a max of ~666 on `life` (`-666`, FREE on the
 CPU, against a live value on the GPU); the fix drops a readback older than the pool unread (`GpuTask::discard`).
 
+**A stop and its return on the GPU path.** The Resources tab's conditions - a game filling the screen, the GPU's
+memory running out, both Stop by default - drop the renderer to free the GPU's memory and make it again on the return,
+while the simulations keep going. The GPU-resident pool goes with the renderer; a backend made afresh must not be
+patched sparsely (zeros read as live slots that never age and never draw: the particles gone until the pool is
+uploaded whole), and the pool is read back whole before the old backend goes, so that the return is seamless rather
+than every particle starting again from birth. `NAGARE_STOP=SEC[,SEC...]` (scene seconds) stops and resumes in one
+tick at each, under `--test` too, to the frame:
+
+```
+NAGARE_STOP=3 nagare --test --renderer vulkan --set startTransition=1 --set gpuParticles=0 --dump-particles 6=cpu.bin --exit-after 6.2
+NAGARE_STOP=3 nagare --test --renderer vulkan --set startTransition=1 --set gpuParticles=1 --dump-particles 6=gpu.bin --exit-after 6.2
+cargo xtask wavediff --particles cpu.bin gpu.bin
+```
+
+Expect the usual quaternion-only ~1e-6. The bug read as 0.2% of floats identical, a mean of NaN (zero orientations)
+and a max of 666 on `life` (`-666` on the CPU against `0` on the GPU).
+
+`NAGARE_STOP` exercises the code path; the *detection* - that a window filling the screen, or the GPU's memory past
+`gpuMemoryThreshold`, really brings the stop and the return - takes a real neighbour against the live wallpaper:
+`cargo run --release --bin nagare-neighbour -- --fullscreen --gpu-memory 80 --hold 15` plays a game that goes full
+screen, fills the GPU's memory (read as Nagare reads it, so its percentage is Nagare's), then quits; `--step` holds at
+each stage for a key, to watch the panel's Reading the room rows and the particles' return.
+
 ---
 
 ## Before a commit

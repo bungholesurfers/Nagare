@@ -1,6 +1,6 @@
 [package]
 name = "nagare-scene"
-version = "0.1.5"
+version = "0.1.6"
 edition = "2021"
 description = "Nagare's scene renderer - the wave, particles, backdrop, post-processing and enhancements - as a reusable library on OpenGL and Vulkan, shared by the wallpaper app and other front-ends"
 license = "MIT"

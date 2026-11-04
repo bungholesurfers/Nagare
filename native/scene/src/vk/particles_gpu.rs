@@ -293,6 +293,11 @@ pub struct ParticlesGpu {
     readback_state: Arc<AtomicU32>,
     /// Whether a life readback is in flight (a dispatch happened and its map hasn't been consumed yet).
     pending: bool,
+    /// Whether the resident pool has ever been uploaded whole. Until it has - a backend just made, after a stop freed
+    /// the GPU's memory or a renderer was switched, or one whose pool was made again - a sparse patch would land on
+    /// zeros, which the shader takes for live slots that never age (aging 0) and never draw (a zero quaternion): the
+    /// particles gone until the pool is uploaded again. So the first upload is always the whole pool.
+    uploaded: bool,
 }
 
 impl ParticlesGpu {
@@ -324,7 +329,7 @@ impl ParticlesGpu {
         let real = if double { 8 } else { 4 };
         let (pool, params, grid, ranks, verts, args, config, life_out, group) = Self::buffers(d, &layout, capacity, real);
         let life_readback = Self::life_readback(d, capacity);
-        ParticlesGpu { double, capacity, pool, params, grid, ranks, verts, args, config, life_out, group, layout, update, life_readback, readback_state: Arc::new(AtomicU32::new(0)), pending: false }
+        ParticlesGpu { double, capacity, pool, params, grid, ranks, verts, args, config, life_out, group, layout, update, life_readback, readback_state: Arc::new(AtomicU32::new(0)), pending: false, uploaded: false }
     }
 
     fn life_readback(d: &wgpu::Device, capacity: usize) -> wgpu::Buffer {
@@ -379,6 +384,13 @@ impl ParticlesGpu {
         self.capacity = capacity;
         self.readback_state = Arc::new(AtomicU32::new(0));
         self.pending = false;
+        self.uploaded = false;
+    }
+
+    /// Whether the GPU holds a pool worth reading back: one uploaded whole and run since. A renderer about to be
+    /// dropped asks, so as not to read a pool never filled over the simulation's own.
+    pub fn resident(&self) -> bool {
+        self.uploaded
     }
 
     /// Syncs the previous dispatch's life column into `pool` (offset 3 of each slot), from the compact async readback.
@@ -420,7 +432,8 @@ impl ParticlesGpu {
         self.readback_state.store(0, Ordering::SeqCst);
     }
 
-    /// Reads the whole GPU-resident pool into `pool` (blocking). For `--dump-particles` only.
+    /// Reads the whole GPU-resident pool into `pool` (blocking): for `--dump-particles`, and for a renderer about to be
+    /// dropped, so that the simulation keeps the pool as the GPU left it rather than the slots' states at birth.
     pub fn read_full(&self, gpu: &Gpu, pool: &mut [f32]) {
         let bytes = (self.capacity * STRIDE * 4) as u64;
         let staging = gpu.device.create_buffer(&wgpu::BufferDescriptor { label: Some("pool full readback"), size: bytes.max(4), usage: wgpu::BufferUsages::MAP_READ | wgpu::BufferUsages::COPY_DST, mapped_at_creation: false });
@@ -474,10 +487,12 @@ impl ParticlesGpu {
         gpu.queue.write_buffer(&self.config, 0, as_bytes(&[cap as u32, frame.seeds[0], frame.seeds[1], frame.seeds[2]]));
         gpu.queue.write_buffer(&self.args, 0, as_bytes(&[4u32, 0, 0, 0]));
 
-        // The pool is resident: a full upload only on the first step / after a reset or a big burst; otherwise just the
-        // slots emit filled this step (8 floats each - position, life, velocity, aging - leaving the GPU's quaternion).
-        if frame.full || frame.emitted.len() > cap / 8 {
+        // The pool is resident: a full upload only on the first step - the simulation's, or this backend's, whose pool
+        // holds nothing until then - after a reset or a big burst; otherwise just the slots emit filled this step
+        // (8 floats each - position, life, velocity, aging - leaving the GPU's quaternion).
+        if frame.full || !self.uploaded || frame.emitted.len() > cap / 8 {
             gpu.queue.write_buffer(&self.pool, 0, as_bytes(&frame.pool[..cap * STRIDE]));
+            self.uploaded = true;
         } else {
             for &slot in frame.emitted {
                 let o = slot * STRIDE;

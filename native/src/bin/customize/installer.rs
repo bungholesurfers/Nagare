@@ -7,7 +7,7 @@
 //!
 //! - `scene-tall.png` and `scene-wide.png`, the scene's shots (Take shots), or any art put in their place;
 //! - `wizard-*.png`, the welcome and finish pages' picture on the left, a tall shot with the box - or, transparent,
-//!   the logo alone;
+//!   the logo alone, or the installer's icon (the box) alone;
 //! - `corner-*.png`, the other pages' small picture at the top right, the box;
 //! - `back-*.png`, behind every page, a wide shot.
 //!
@@ -127,6 +127,8 @@ pub struct Theme {
     more: String,
     /// The welcome picture see-through, the logo alone on it: no shot and no box.
     transparent: bool,
+    /// On the see-through picture, the installer's icon - the Installer icon tab's box - in place of the logo.
+    transparent_box: bool,
     own_pictures: bool,
 }
 
@@ -167,6 +169,7 @@ impl Default for Theme {
             renderer: 0,
             more: String::new(),
             transparent: false,
+            transparent_box: false,
             own_pictures: false,
         }
     }
@@ -314,7 +317,7 @@ fn art(dir: &Path, name: &str, width: u32, height: u32) -> Result<Vec<[f32; 4]>,
 }
 
 /// The welcome picture at one size: the tall shot, darkening to the theme's dark colour at its foot, and the box; or,
-/// transparent, the logo alone, where the box would be.
+/// transparent, the logo alone (or the installer's icon, the box, alone), where the box would be.
 fn wizard(t: &Theme, dir: &Path, emblem: &dyn Fn(u32) -> Image, (w, h): (u32, u32)) -> Result<Vec<Px>, String> {
     let mut px = if t.transparent { vec![[0.0; 4]; (w * h) as usize] } else { art(dir, "scene-tall.png", w, h)? };
     if !t.transparent {
@@ -342,9 +345,10 @@ fn wizard(t: &Theme, dir: &Path, emblem: &dyn Fn(u32) -> Image, (w, h): (u32, u3
     Ok(px)
 }
 
-/// What the welcome picture shows at `side` pixels: the box, or on a transparent one the logo.
+/// What the welcome picture shows at `side` pixels: the box, or on a transparent one the logo - unless the installer's
+/// icon, the box again, is asked for there.
 fn emblem(t: &Theme, boxed: &package::Design, pictures: &package::Pictures, logo: &logo::Design, chain: &[&ab_glyph::FontVec], side: u32) -> Image {
-    if t.transparent {
+    if t.transparent && !t.transparent_box {
         logo::render_image(logo, chain, side)
     } else {
         package::render_image(boxed, pictures, side)
@@ -515,6 +519,13 @@ impl Tab {
         ui.checkbox(&mut t.transparent, "welcome picture transparent, the logo alone").on_hover_text(
             "No shot and no box on the welcome and finish pages: the App icon tab's logo, at the box's size and height, over the page's own colour",
         );
+        ui.add_enabled_ui(t.transparent, |ui| {
+            ui.indent("transparent_box", |ui| {
+                ui.checkbox(&mut t.transparent_box, "the installer icon in place of the logo").on_hover_text(
+                    "On the transparent picture, the Installer icon tab's box, at the same size and height, instead of the App icon tab's logo",
+                );
+            });
+        });
         ui.checkbox(&mut t.own_pictures, "keep my own pictures").on_hover_text(
             "Render then writes only theme.json and theme.iss, and leaves wizard-*.png, corner-*.png and back-*.png as they are",
         );

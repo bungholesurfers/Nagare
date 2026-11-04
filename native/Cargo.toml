@@ -1,6 +1,6 @@
 [package]
 name = "nagare"
-version = "0.1.5"
+version = "0.1.6"
 edition = "2021"
 description = "Native port of the PS3 XMB wave and particles recreation, with a Windows desktop-wallpaper mode"
 license = "MIT"
@@ -33,6 +33,12 @@ path = "src/bin/customize/main.rs"
 [[bin]]
 name = "nagare-release"
 path = "src/bin/release.rs"
+
+# A neighbour to test the Resources tab against: a window filling the screen or maximized, the GPU's memory eaten.
+# A tool of the repository's, not shipped.
+[[bin]]
+name = "nagare-neighbour"
+path = "src/bin/neighbour.rs"
 
 [dependencies]
 nagare-scene = { path = "scene" }

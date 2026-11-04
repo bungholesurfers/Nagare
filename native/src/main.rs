@@ -637,6 +637,16 @@ fn forced_failure(what: &str) -> bool {
     std::env::var("NAGARE_FAIL").is_ok_and(|v| v.to_ascii_lowercase().split(',').any(|f| f.trim() == what))
 }
 
+/// `NAGARE_STOP=SEC[,SEC...]`: scene seconds at each of which the scene stops as the GPU's memory running out stops
+/// it (the renderer dropped, the simulations kept) and comes back in the same tick, through resumeTransition: to test,
+/// headlessly and to the frame under --test, what has to cross that, the particle pool the GPU ran, say. How long a
+/// real stop lasts changes nothing of that. Unset: none.
+fn forced_stops() -> Vec<f64> {
+    let mut at: Vec<f64> = std::env::var("NAGARE_STOP").map(|v| v.split(',').filter_map(|s| s.trim().parse().ok()).collect()).unwrap_or_default();
+    at.sort_by(f64::total_cmp);
+    at
+}
+
 /// A panic's message, from its payload.
 fn panic_message(payload: &(dyn std::any::Any + Send)) -> String {
     payload
@@ -794,6 +804,8 @@ struct App {
     poke_tip: bool,
     tip_close: Option<(f64, f64, f64, f64)>,
     xmb_at: f64,
+    /// NAGARE_STOP's stops still to come, in scene seconds, soonest first.
+    forced_stops: Vec<f64>,
     /// Software Update (update.rs): the updater; whether the user has agreed to its checks (None until asked, by the
     /// card on the scene), whether it checks by itself, when it next does (seconds since 1970, kept in the config),
     /// whether the last finished check has set that, and where the card's buttons were laid out (true for OK and ×).
@@ -1150,6 +1162,7 @@ impl App {
             poke_tip,
             tip_close: None,
             xmb_at: 0.0,
+            forced_stops: forced_stops(),
             updater: update::Updater::new(),
             update_consent,
             update_auto: update_auto || update_now,
@@ -1747,6 +1760,14 @@ impl App {
     /// the scene back (through resumeTransition). While the settings show, the scene only limits its frame rate, so
     /// that they can be used. Returns whether frames are to be drawn.
     fn give_way(&mut self, event_loop: &ActiveEventLoop) -> bool {
+        // NAGARE_STOP: the stop the GPU's memory running out would bring, and the return, in one tick - a test's too.
+        if self.forced_stops.first().is_some_and(|&at| self.frame_now >= at) && self.gfx.is_some() {
+            let at = self.forced_stops.remove(0);
+            self.stop_now(true);
+            self.rebuild_gfx(event_loop);
+            self.resume(true);
+            eprintln!("NAGARE_STOP: stopped and resumed at {at} s (frame {})", self.frames);
+        }
         if self.options.test.is_some() {
             return true;
         }
@@ -2096,6 +2117,14 @@ impl App {
                 self.stash = Some(Stash { window, gl: Some((config, surface)) });
             }
             Back::Vk(mut v) => {
+                // While gpuParticles runs the pool on the GPU the simulation holds only its life column: the whole pool
+                // is read back before the backend goes, so that the next one is given the pool as the scene left off,
+                // not the slots' states at birth. (One lost outright cannot be read; the next then starts from birth.)
+                if self.drawn.gpu_particles != 0.0 && !forced_failure("gpuparticles") && v.particles_resident() {
+                    if let Some(mut task) = v.particle_task() {
+                        particles_sim::GpuTask::read_full(&mut task, self.sim.particles.pool_mut());
+                    }
+                }
                 #[cfg(windows)]
                 if shrink {
                     v.resize(1, 1);
@@ -2157,6 +2186,14 @@ impl App {
             if let Back::Gl(g) = &mut gfx.back {
                 g.overlay.destroy();
                 g.egui.destroy();
+            }
+            // The particle pool the GPU ran goes on with the next renderer: read back, as `free_gfx` reads it.
+            if let Back::Vk(v) = &mut gfx.back {
+                if self.drawn.gpu_particles != 0.0 && !forced_failure("gpuparticles") && v.particles_resident() {
+                    if let Some(mut task) = v.particle_task() {
+                        particles_sim::GpuTask::read_full(&mut task, self.sim.particles.pool_mut());
+                    }
+                }
             }
         }
         self.stash = None;

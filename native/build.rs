@@ -33,11 +33,12 @@ fn resource(out: &mut Vec<u8>, kind: u16, name: u16, flags: u16, data: &[u8]) {
 }
 
 /// The executables, each with what its version information describes it as.
-const BINS: [(&str, &str); 4] = [
+const BINS: [(&str, &str); 5] = [
     ("nagare", "Nagare"),
     ("nagare-watchdog", "Nagare watchdog"),
     ("nagare-customize", "Nagare customizer"),
     ("nagare-release", "Nagare release tool"),
+    ("nagare-neighbour", "Nagare neighbour (a test tool)"),
 ];
 
 /// A version resource's node: its length, its value's length (`value_len`: in characters for text, else bytes),

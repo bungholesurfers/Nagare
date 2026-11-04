@@ -976,7 +976,7 @@ error while drawing: the next one takes over at once. spline.elf on the GPU is m
 builds the wave, and only it. The panel's top says, in amber, what failed and what draws. `NAGARE_FAIL` makes them
 fail on purpose, to try this: `vulkan`, `opengl`, `software`, `gpuwave`, `lost` (the device two seconds in), `lostonce` (only the first device, so that the renderer's return can be watched;
 `NAGARE_RETRY_SEC` shortens the 5 minutes before it is tried again) or
-`panic` (the whole app three seconds in, for the watchdog), separated by commas. `NAGARE_SUBFRAMES=n` checks the motion blur's sub-frames (see Motion blur), and `NAGARE_PANEL_SCROLL=points` holds the panel scrolled that far down, to shoot a part of it.
+`panic` (the whole app three seconds in, for the watchdog), separated by commas. `NAGARE_STOP=SEC[,SEC...]` stops the scene as the GPU's memory running out stops it - the renderer dropped and made again, the simulations kept - and brings it back in the same tick, at those scene seconds, under `--test` too: what has to cross a stop (the particle pool the GPU ran) can be checked to the frame. `NAGARE_SUBFRAMES=n` checks the motion blur's sub-frames (see Motion blur), and `NAGARE_PANEL_SCROLL=points` holds the panel scrolled that far down, to shoot a part of it.
 
 It draws what OpenGL draws, with the same programs: `vk/glsl.rs` takes each program's GLSL from the OpenGL modules and
 rewrites it for naga's front end - its loose uniforms into one std140 block, its samplers split in two, its inputs
@@ -1172,6 +1172,7 @@ source of truth: the constants, and the comments naming their firmware addresses
 | `src/watchdog.rs`          | the app's own: starting the watchdog, and the crash log      |
 | `src/bin/watchdog.rs`      | `nagare-watchdog`, which starts the app again should it crash |
 | `src/bin/customize/`       | `nagare-customize`: the app's and the installer's icons, the installer's look and build |
+| `src/bin/neighbour.rs`     | `nagare-neighbour`: a neighbour for the Resources tab to read - a window filling the screen or maximized, the GPU's memory taken up to a percentage and given back - to try its conditions, and what crosses a stop, against the live wallpaper; not shipped |
 | `build.rs`                 | the logo's icon, into the Windows executables                |
 
 The simulations keep the page's number types (its `Float32Array`s are `f32`, its other numbers `f64`), so they round
@@ -1211,7 +1212,8 @@ opens again. Everything is drawn on the CPU, in linear light, several samples a 
   `installer/theme` every size, `setup.ico` and `box.json`.
 - **Installer** (`installer.rs`), the setup wizard: light, dark or as Windows is, Inno Setup's built-in styles, its
   background colours, and its pictures - the welcome and finish pages' tall one (a shot of the scene, darker at the
-  foot, with the box - or, transparent, the logo alone), the box in the other pages' corner, and a wide shot behind
+  foot, with the box - or, transparent, the logo alone, or the installer's icon, the box, alone), the box in the
+  other pages' corner, and a wide shot behind
   every page, at an opacity. **Take shots** runs the release build for the two shots (`--test` runs, the same every
   time), each at a date and time, and seconds into it, of its own, with auto exposure or without, and maru-chan held
   at a place across it of one's choosing (the app's hidden `maruAt`) or away, either alone or both; the tall one is cut

@@ -528,6 +528,12 @@ impl VkGfx {
         Some(particles_gpu::ParticleTask { gpu, backend })
     }
 
+    /// Whether the GPU holds a particle pool uploaded whole and run since - one worth reading back before this
+    /// backend goes.
+    pub fn particles_resident(&self) -> bool {
+        self.particle_gpu.as_ref().is_some_and(|p| p.resident())
+    }
+
     pub fn resize(&mut self, width: u32, height: u32) {
         if width == 0 || height == 0 || (width, height) == (self.config.width, self.config.height) {
             return;

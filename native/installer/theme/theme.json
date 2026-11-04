@@ -1,7 +1,7 @@
 {
   "appearance": "Dark",
-  "style": "Polar",
-  "hide_bevels": false,
+  "style": "Plain",
+  "hide_bevels": true,
   "title_bar": true,
   "back_colours": true,
   "back_light": [
@@ -19,8 +19,8 @@
   "back": true,
   "back_opacity": 255,
   "picture_opacity": 255,
-  "box_size": 0.78,
-  "box_y": 0.6,
+  "box_size": 1.0,
+  "box_y": 0.62,
   "foot": 0.0,
   "tall_date": "2007-08-11T12:37:00",
   "tall_seconds": 24.0,
@@ -40,6 +40,7 @@
   "grain": true,
   "renderer": 0,
   "more": "",
-  "transparent": false,
+  "transparent": true,
+  "transparent_box": true,
   "own_pictures": false
 }

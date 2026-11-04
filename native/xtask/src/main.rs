@@ -172,7 +172,7 @@ fn free(exes: &[PathBuf]) {
 /// The release folder's own exes.
 fn release_exes() -> Vec<PathBuf> {
     let dir = native().join("target").join("release");
-    ["nagare", "nagare-watchdog", "nagare-release"].iter().map(|n| exe(&dir, n)).collect()
+    ["nagare", "nagare-watchdog", "nagare-release", "nagare-neighbour"].iter().map(|n| exe(&dir, n)).collect()
 }
 
 fn build() -> Result {
